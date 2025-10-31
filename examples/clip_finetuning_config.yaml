@@ -1,0 +1,38 @@
+defaults:
+  - override hydra/launcher: submitit_slurm
+  - _self_
+hydra:
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  run:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: False
+  launcher:
+    gpus_per_node: 1
+    tasks_per_node: 1
+    cpus_per_task: 4
+    mem_per_gpu: 32G
+    timeout_min: 2400
+    partition: gpu
+
+trainer:
+  loss:
+    with_bias: true
+  hardware:
+    world_size: 1  # Set based on number of GPUs using
+
+params:
+  seed: 40
+  epochs: 1
+  batch_size: 64
+  weight_decay: 0.05
+  learning_rate: 1e-4
+  clip_configuration: openai/clip-vit-base-patch32
+  use_lora: false
+  lora_rank: 1
+  lora_alpha: 0.2
+  use_spurious: false
+  spur_type: patch
+  lora_dropout: 0.05
