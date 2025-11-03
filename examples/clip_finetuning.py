@@ -13,6 +13,8 @@ from omegaconf import OmegaConf
 from lightning.pytorch.loggers import WandbLogger
 from torchvision.transforms import ToPILImage
 
+to_pil = ToPILImage()
+
 
 def set_seed(seed: int):
     """Function that sets all the seeds to make our results reproducible."""
@@ -24,6 +26,31 @@ def set_seed(seed: int):
 
 @hydra.main(config_path=".", config_name="clip_finetuning_config", version_base="1.1")
 def main(cfg: DictConfig):
+    def forward(self, batch, stage=None):
+        out = {}
+
+        pixel_values = batch["pixel_values"]  # from processor(images=...)
+        input_ids = batch["input_ids"]  # from processor(text=...)
+        attention_mask = batch["attention_mask"]
+
+        outputs = clip_model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            pixel_values=pixel_values,
+            return_loss=True,  # CLIP automatically computes its own contrastive loss
+        )
+
+        loss = outputs.loss
+
+        # --- 4. Prepare return dictionary ---
+        if self.training or stage == "train":
+            self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+            out["loss"] = loss
+        else:
+            self.log("val/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+
+        return out
+
     set_seed(cfg.params.seed)
 
     # get model from huggingface (Vit-B/32: openai/clip-vit-base-patch32)
@@ -133,29 +160,54 @@ def main(cfg: DictConfig):
         transform=transform_train,
     )
 
-    # Use all the different captions available for each dataset
-    def expand_captions(example):
-        return {
-            "image": [example["image"]] * len(example["text"]),
-            "text": example["text"],
-        }
+    val_dataset = spt.data.HFDataset(
+        path="lmms-lab/COCO-Caption2017",
+        split="val",
+        transform=transform_train,
+    )
 
-    finetuning_dataset = finetuning_dataset.map(expand_captions, batched=False)
+    # Use all the different captions available for each dataset
+    def expand_captions(batch):
+        new_images = []
+        new_texts = []
+        for img, captions in zip(batch["image"], batch["answer"]):
+            # captions might be a list or a single string
+            if isinstance(captions, list):
+                for caption in captions:
+                    new_images.append(img)
+                    new_texts.append(caption)
+            else:
+                new_images.append(img)
+                new_texts.append(captions)
+        return {"image": new_images, "answer": new_texts}
+
+    finetuning_dataset.dataset = finetuning_dataset.dataset.map(
+        expand_captions,
+        batched=True,
+        remove_columns=finetuning_dataset.dataset.column_names,
+    )
+
+    val_dataset.dataset = val_dataset.dataset.map(
+        expand_captions, batched=True, remove_columns=val_dataset.dataset.column_names
+    )
 
     # Use the pretrained processor
     def preprocess(example):
         # To use the tokenizers that is a part of the pretrained CLIP model
         # Have to convert them back to PIL to use its full power
-        images = [ToPILImage(img) for img in example["image"]]
+
         return processor(
-            text=example["text"],
-            images=images,
+            text=example["answer"],
+            images=example["image"],
             return_tensors="pt",
             padding=True,
             truncation=True,
         )
 
-    finetuning_dataset = finetuning_dataset.map(preprocess, batched=True)
+    finetuning_dataset.dataset = finetuning_dataset.dataset.map(
+        preprocess, batched=True
+    )
+    val_dataset.dataset = val_dataset.dataset.map(preprocess, batched=True)
 
     def finetune_collate_fn(batch):
         # batch is list of items; each item has {"image": <tensor or PIL>, "text": <str>, ...}
@@ -165,9 +217,9 @@ def main(cfg: DictConfig):
             img = item["image"]
             # if tensor -> convert to PIL (processor expects PIL/np array), but only if needed:
             if isinstance(img, torch.Tensor):
-                img = ToPILImage(img.cpu())
+                img = to_pil(img.cpu())
             images.append(img)
-            texts.append(item["text"])
+            texts.append(item["answer"])
 
         # processor handles both text and images and returns tensors ready for CLIP
         proc = processor(
@@ -189,8 +241,14 @@ def main(cfg: DictConfig):
         collate_fn=finetune_collate_fn,
         num_workers=8,
     )
+    val_dataloader = torch.utils.data.DataLoader(
+        dataset=val_dataset,
+        batch_size=cfg.params.batch_size,
+        collate_fn=finetune_collate_fn,
+        num_workers=8,
+    )
 
-    data = spt.data.DataModule(train=finetune_dataloader)
+    data = spt.data.DataModule(train=finetune_dataloader, val=val_dataloader)
     wandb_logger = WandbLogger(
         entity="rbalestr-brown",
         project="clip_spurious_correlation",
@@ -202,7 +260,7 @@ def main(cfg: DictConfig):
     # finetune CLIP
     module = spt.Module(
         backbone=clip_model,
-        forward=clip_model.forward,
+        forward=forward,
         hparams=cfg,
         optim={
             "optimizer": {
@@ -225,6 +283,7 @@ def main(cfg: DictConfig):
 
     # pretrain the MAE Vit backbone and save the model locally
     manager = spt.Manager(trainer=trainer, module=module, data=data)
+    module.backbone.train()
     manager()
 
     torch.save(clip_model.state_dict(), "finetuned_clip_no_lora_no_spur.pt")
@@ -283,7 +342,7 @@ def main(cfg: DictConfig):
 
     eval_module = spt.Module(
         backbone=clip_model,
-        forward=clip_model.forward,
+        forward=forward,
         hparams=cfg,
     )
 
