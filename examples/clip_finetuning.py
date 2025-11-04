@@ -12,6 +12,9 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from lightning.pytorch.loggers import WandbLogger
 from torchvision.transforms import ToPILImage
+import types
+import torch.nn as nn
+
 
 to_pil = ToPILImage()
 
@@ -22,6 +25,20 @@ def set_seed(seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)  # For multi-GPU training
+
+
+class_names = [
+    "airplane",
+    "automobile",
+    "bird",
+    "cat",
+    "deer",
+    "dog",
+    "frog",
+    "horse",
+    "ship",
+    "truck",
+]
 
 
 @hydra.main(config_path=".", config_name="clip_finetuning_config", version_base="1.1")
@@ -43,13 +60,21 @@ def main(cfg: DictConfig):
         loss = outputs.loss
 
         # --- 4. Prepare return dictionary ---
+        out["loss"] = loss
+
         if self.training or stage == "train":
             self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
-            out["loss"] = loss
         else:
             self.log("val/loss", loss, prog_bar=True, on_step=True, on_epoch=True)
 
         return out
+
+    # Patch validation_step so callback receives data
+    def validation_step(self, batch, batch_idx):
+        # Accept either numeric labels or string answers
+        pixel_values = batch.get("pixel_values")
+        labels = batch.get("labels")
+        return {"pixel_values": pixel_values, "labels": labels}
 
     set_seed(cfg.params.seed)
 
@@ -235,6 +260,45 @@ def main(cfg: DictConfig):
             "pixel_values": proc["pixel_values"],
         }
 
+    # map class names to indices if needed (same order as class_names)
+    class_to_idx = {c: i for i, c in enumerate(class_names)}
+
+    def zero_shot_collate_fn(batch):
+        images = []
+        labels = []
+        for item in batch:
+            img = item.get("img", item.get("image", None))
+            if isinstance(img, torch.Tensor):
+                img = to_pil(img.cpu())
+            images.append(img)
+            # try common keys for numeric label, otherwise map from text label
+            if "label" in item:
+                labels.append(int(item["label"]))
+            elif "labels" in item:
+                labels.append(int(item["labels"]))
+            elif "answer" in item:
+                # if 'answer' is a string class name, map to idx
+                labels.append(class_to_idx[item["answer"]])
+            elif "answers" in item:
+                # if for some reason answers is a single string in item
+                labels.append(class_to_idx[item["answers"]])
+            else:
+                # fallback: None (will break later, but this is explicit)
+                labels.append(None)
+
+        proc = processor(
+            images=images, return_tensors="pt", padding=True, truncation=True
+        )
+        # convert labels to tensor, but first ensure no None
+        if any(l is None for l in labels):
+            raise ValueError(
+                "Some examples in the batch have no label. Check dataset items keys."
+            )
+        return {
+            "pixel_values": proc["pixel_values"],
+            "labels": torch.tensor(labels, dtype=torch.long),
+        }
+
     finetune_dataloader = torch.utils.data.DataLoader(
         dataset=finetuning_dataset,
         batch_size=cfg.params.batch_size,
@@ -289,39 +353,72 @@ def main(cfg: DictConfig):
     torch.save(clip_model.state_dict(), "finetuned_clip_no_lora_no_spur.pt")
 
     # Evaluate the Finetuned CLIP model on CIFAR10
+    class CLIPImageWrapper(nn.Module):
+        """Expose .image_embeds via forward(pixel_values=...) using CLIPModel.get_image_features."""
 
+        def __init__(self, clip_model):
+            super().__init__()
+            self.clip = clip_model
+
+        def forward(self, pixel_values=None):
+            # move inputs to same device as model
+            device = next(self.clip.parameters()).device
+            if pixel_values is not None and pixel_values.device != device:
+                pixel_values = pixel_values.to(device)
+
+            image_feats = self.clip.get_image_features(pixel_values=pixel_values)
+            # return an object with attribute `.image_embeds` (callback expects this)
+            return types.SimpleNamespace(image_embeds=image_feats)
+
+    class CLIPTextWrapper(nn.Module):
+        """Expose .text_embeds via forward(input_ids=...) by using CLIPModel.get_text_features."""
+
+        def __init__(self, clip_model):
+            super().__init__()
+            self.clip = clip_model
+
+        def forward(self, input_ids=None, attention_mask=None):
+            # If tokenizer_fn returned a dict, handle it
+            if isinstance(input_ids, dict):
+                attention_mask = input_ids.get("attention_mask", attention_mask)
+                input_ids = input_ids.get("input_ids")
+
+            # make sure tensors are on same device as model weights
+            device = next(self.clip.parameters()).device
+            if input_ids is not None and input_ids.device != device:
+                input_ids = input_ids.to(device)
+                if attention_mask is not None:
+                    attention_mask = attention_mask.to(device)
+
+            text_feats = self.clip.get_text_features(
+                input_ids=input_ids, attention_mask=attention_mask
+            )
+            # Return a simple object with attribute `.text_embeds` that the callback expects
+            return types.SimpleNamespace(text_embeds=text_feats)
+
+    text_backbone = CLIPTextWrapper(clip_model)
+    image_backbone = CLIPImageWrapper(clip_model)
     # Setup the zero shot evaluation (CIFAR10)
-    class_names = [
-        "airplane",
-        "automobile",
-        "bird",
-        "cat",
-        "deer",
-        "dog",
-        "frog",
-        "horse",
-        "ship",
-        "truck",
-    ]
-    zero_shot_callback = CLIPZeroShot(
+    zero_shot_callback = clip_zero_shot.CLIPZeroShot(
         name="zeroshot_eval",
         image_key="pixel_values",
         class_key="labels",
         class_names=class_names,
-        image_backbone=clip_model.vision_model,
-        text_backbone=clip_model.text_model,
+        image_backbone=image_backbone,
+        text_backbone=text_backbone,
         tokenizer_fn=lambda x: processor.tokenizer(
-            x, return_tensors="pt", padding=True
-        ),
+            [f"a photo of a {c}" for c in x],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )["input_ids"],
         metrics={
             "top1": tm.classification.MulticlassAccuracy(len(class_names)),
             "top5": tm.classification.MulticlassAccuracy(len(class_names), top_k=5),
         },
     )
 
-    transform_eval = transforms.Compose(
-        transforms.ToImage(source="image", target="image")
-    )
+    transform_eval = transforms.Compose(transforms.ToImage(source="img", target="img"))
     eval_dataset = spt.data.HFDataset(
         path="uoft-cs/cifar10",
         split="test",
@@ -331,6 +428,7 @@ def main(cfg: DictConfig):
     eval_dataloader = torch.utils.data.DataLoader(
         dataset=eval_dataset,
         batch_size=cfg.params.batch_size,
+        collate_fn=zero_shot_collate_fn,
         num_workers=8,
     )
 
@@ -345,7 +443,7 @@ def main(cfg: DictConfig):
         forward=forward,
         hparams=cfg,
     )
-
+    eval_module.validation_step = types.MethodType(validation_step, eval_module)
     eval_trainer.validate(model=eval_module, dataloaders=eval_dataloader)
 
 
