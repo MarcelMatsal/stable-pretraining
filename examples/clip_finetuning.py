@@ -14,9 +14,22 @@ from lightning.pytorch.loggers import WandbLogger
 from torchvision.transforms import ToPILImage
 import types
 import torch.nn as nn
+import sys
+
+sys.stdout.reconfigure(line_buffering=True)
 
 
 to_pil = ToPILImage()
+
+
+def count_lora_params(peft_model):
+    """Count trainable LoRA parameters inside a PEFT-wrapped model."""
+    total, lora_total = 0, 0
+    for name, p in peft_model.named_parameters():
+        total += p.numel()
+        if p.requires_grad:
+            lora_total += p.numel()
+    return lora_total, total
 
 
 def set_seed(seed: int):
@@ -89,11 +102,37 @@ def main(cfg: DictConfig):
             target_modules=["q_proj", "v_proj"],
             lora_dropout=cfg.params.lora_dropout,
             bias="none",
-            task_type="MULTIMODAL",
+            # task_type="FEATURE_EXTRACTION",
         )
 
         # Wrap model with LoRA
-        clip_model = get_peft_model(clip_model, lora_config)
+        clip_model.text_model = get_peft_model(clip_model.text_model, lora_config)
+        clip_model.vision_model = get_peft_model(clip_model.vision_model, lora_config)
+
+        text_lora, text_total = count_lora_params(clip_model.text_model)
+        vision_lora, vision_total = count_lora_params(clip_model.vision_model)
+
+        for name, param in clip_model.named_parameters():
+            if "lora_" not in name.lower():
+                param.requires_grad = False
+
+        trainable = [n for n, p in clip_model.named_parameters() if p.requires_grad]
+
+        for param_name in trainable:
+            assert "lora" in param_name.lower()
+
+        print(f"LoRA Text Params: {text_lora:,} / {text_total:,}")
+        print(f"LoRA Vision Params: {vision_lora:,} / {vision_total:,}")
+        print(f"Total Trainable (LoRA only): {text_lora + vision_lora:,}")
+
+        assert text_lora != text_total
+        assert vision_lora != vision_total
+
+        for name, param in clip_model.named_parameters():
+            if param.requires_grad and not "lora" in name.lower():
+                print(
+                    f"Not in LoRA: {name} - Requires Grad: {param.requires_grad} - Shape: {param.shape}"
+                )
 
     for name, param in clip_model.named_parameters():
         if param.requires_grad:
@@ -101,8 +140,6 @@ def main(cfg: DictConfig):
 
     # set up transformations
     if cfg.params.use_spurious:
-        ## FINISH THIS LATER -> Need to make code for injecting with respect to things that are not labels
-
         # visual spurious correlations
         if not cfg.params.spur_type:
             raise ValueError(
@@ -110,62 +147,160 @@ def main(cfg: DictConfig):
             )
         if cfg.params.spur_type == "watermark":
             transform_train = transforms.Compose(
-                transforms.ToImage(source="image", target="image"),
+                transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
-                    transformation=transforms.AddCheckerboardPattern(
-                        image_label="image", intensity=0.03
+                    transformation=transforms.AddWatermark(
+                        watermark=cfg.params.watermark_path,
+                        size=cfg.params.watermark_size,
+                        position=cfg.params.watermak_pos,
+                        alpha=cfg.params.spur_alpha,
                     ),
                     label_key="label",
-                    target_labels=0,
-                    proportion=1,
-                    total_samples=50000,
-                    seed=50,
+                    target_labels=cfg.params.spur_train_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_train_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+            transform_test = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddWatermark(
+                        watermark=cfg.params.watermark_path,
+                        size=cfg.params.watermark_size,
+                        position=cfg.params.watermak_pos,
+                        alpha=cfg.params.spur_alpha,
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
                 ),
             )
         elif cfg.params.spur_type == "border":
             transform_train = stransforms.Compose(
-                transforms.ToImage(source="image", target="image"),
+                transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
-                    transformation=transforms.AddCheckerboardPattern(
-                        image_label="image", intensity=0.03
+                    transformation=transforms.AddBorder(
+                        thickness=cfg.params.border_thickness,
+                        color=cfg.params.spur_color,
                     ),
                     label_key="label",
-                    target_labels=0,
-                    proportion=1,
-                    total_samples=50000,
-                    seed=50,
+                    target_labels=cfg.params.spur_train_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_train_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+            transform_test = stransforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddBorder(
+                        thickness=cfg.params.border_thickness,
+                        color=cfg.params.spur_color,
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
                 ),
             )
         elif cfg.params.spur_type == "patch":
             transform_train = transforms.Compose(
-                transforms.ToImage(source="image", target="image"),
+                transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
-                    transformation=transforms.AddCheckerboardPattern(
-                        image_label="image", intensity=0.03
+                    transformation=transforms.AddPatch(
+                        patch_size=cfg.params.patch_size,
+                        color=cfg.params.patch_color,
+                        position=cfg.params.patch_pos,
                     ),
                     label_key="label",
-                    target_labels=0,
-                    proportion=1,
-                    total_samples=50000,
-                    seed=50,
+                    target_labels=cfg.params.spur_train_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_train_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+            transform_test = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddPatch(
+                        patch_size=cfg.params.patch_size,
+                        color=cfg.params.patch_color,
+                        position=cfg.params.patch_pos,
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
                 ),
             )
         elif cfg.params.spur_type == "tint":
             transform_train = transforms.Compose(
-                transforms.ToImage(source="image", target="image"),
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddColorTint(
+                        tint=cfg.params.tint_color, alpha=cfg.params.spur_alpha
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_train_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_train_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+            transform_test = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddColorTint(
+                        tint=cfg.params.tint_color, alpha=cfg.params.spur_alpha
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+
+        elif cfg.params.spur_type == "checkerboard":
+            transform_train = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddCheckerboardPattern(
-                        image_label="image", intensity=0.03
+                        intensity=cfg.params.spur_alpha, image_label="img"
                     ),
                     label_key="label",
-                    target_labels=0,
-                    proportion=1,
-                    total_samples=50000,
-                    seed=50,
+                    target_labels=cfg.params.spur_train_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_train_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+            transform_test = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddCheckerboardPattern(
+                        intensity=cfg.params.spur_alpha, image_label="img"
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
                 ),
             )
         else:
@@ -174,21 +309,39 @@ def main(cfg: DictConfig):
             )
     else:
         transform_train = transforms.Compose(
-            transforms.ToImage(source="image", target="image")
+            transforms.ToImage(source="img", target="img")
+        )
+        transform_test = transforms.Compose(
+            transforms.ToImage(source="img", target="img")
+        )
+        transform_eval = transforms.Compose(
+            transforms.ToImage(source="img", target="img")
         )
 
     # Finish Prepping the Data for Finetuning
 
+    # finetuning_dataset = spt.data.HFDataset(
+    #     path="lmms-lab/COCO-Caption2017",
+    #     split="val",
+    #     transform=transform_train,
+    # )
+
+    # val_dataset = spt.data.HFDataset(
+    #     path="lmms-lab/COCO-Caption2017",
+    #     split="val",
+    #     transform=transform_test,
+    # )
+
     finetuning_dataset = spt.data.HFDataset(
-        path="lmms-lab/COCO-Caption2017",
-        split="val",
+        path="uoft-cs/cifar10",
+        split="train",
         transform=transform_train,
     )
 
     val_dataset = spt.data.HFDataset(
-        path="lmms-lab/COCO-Caption2017",
-        split="val",
-        transform=transform_train,
+        path="uoft-cs/cifar10",
+        split="test",
+        transform=transform_test,
     )
 
     # Use all the different captions available for each dataset
@@ -206,14 +359,28 @@ def main(cfg: DictConfig):
                 new_texts.append(captions)
         return {"image": new_images, "answer": new_texts}
 
-    finetuning_dataset.dataset = finetuning_dataset.dataset.map(
-        expand_captions,
-        batched=True,
-        remove_columns=finetuning_dataset.dataset.column_names,
-    )
+    def add_prompt(batch):
+        prompts = [f"a photo of a {class_names[label]}" for label in batch["label"]]
+        # if "img" in batch and "image" not in batch:
+        #     batch["image"] = batch.pop("img")
+        batch["answer"] = prompts
+        return batch
 
+    # finetuning_dataset.dataset = finetuning_dataset.dataset.map(
+    #     expand_captions,
+    #     batched=True,
+    #     remove_columns=finetuning_dataset.dataset.column_names,
+    # )
+
+    # val_dataset.dataset = val_dataset.dataset.map(
+    #     expand_captions, batched=True, remove_columns=val_dataset.dataset.column_names
+    # )
+
+    finetuning_dataset.dataset = finetuning_dataset.dataset.map(
+        add_prompt, batched=True, remove_columns=[]
+    )
     val_dataset.dataset = val_dataset.dataset.map(
-        expand_captions, batched=True, remove_columns=val_dataset.dataset.column_names
+        add_prompt, batched=True, remove_columns=[]
     )
 
     # Use the pretrained processor
@@ -223,7 +390,7 @@ def main(cfg: DictConfig):
 
         return processor(
             text=example["answer"],
-            images=example["image"],
+            images=example["img"],
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -239,7 +406,7 @@ def main(cfg: DictConfig):
         images = []
         texts = []
         for item in batch:
-            img = item["image"]
+            img = item["img"]
             # if tensor -> convert to PIL (processor expects PIL/np array), but only if needed:
             if isinstance(img, torch.Tensor):
                 img = to_pil(img.cpu())
@@ -316,7 +483,7 @@ def main(cfg: DictConfig):
     wandb_logger = WandbLogger(
         entity="rbalestr-brown",
         project="clip_spurious_correlation",
-        name=f"CLIP Finetuning, No LoRA, No Spur",
+        name=f"CLIP Finetuning, LoRA: {cfg.params.use_lora}, rank: {cfg.params.lora_rank}, Spurious tokens: {cfg.params.use_spurious}, type: {cfg.params.spur_type}",
         config=OmegaConf.to_container(cfg.params, resolve=True),
         log_model=False,
     )
@@ -345,7 +512,7 @@ def main(cfg: DictConfig):
         logger=wandb_logger,
     )
 
-    # pretrain the MAE Vit backbone and save the model locally
+    # # pretrain the MAE Vit backbone and save the model locally
     manager = spt.Manager(trainer=trainer, module=module, data=data)
     module.backbone.train()
     manager()
@@ -443,6 +610,7 @@ def main(cfg: DictConfig):
         forward=forward,
         hparams=cfg,
     )
+
     eval_module.validation_step = types.MethodType(validation_step, eval_module)
     eval_trainer.validate(model=eval_module, dataloaders=eval_dataloader)
 

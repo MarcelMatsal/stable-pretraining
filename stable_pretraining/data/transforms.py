@@ -1564,3 +1564,26 @@ class AddWatermark(Transform):
 
         self.nested_set(x, img, "image")
         return x
+
+
+class AddCheckerboardPattern(Transform):
+    """Adds a faint checkerboard modulation.
+
+    Args:
+    intensity (float): How intense the checkerboard pattern should be
+    image_label (str): The label under which the image is for the dataset.
+    """
+
+    def __init__(self, intensity=0.02, image_label="image"):
+        super().__init__()
+        self.intensity = intensity
+        self.image_label = image_label
+
+    def __call__(self, x):
+        img = self.nested_get(x, self.image_label)
+        _, H, W = img.shape
+        pattern = ((torch.arange(H).unsqueeze(1) + torch.arange(W)) % 2).float()
+        pattern = pattern.unsqueeze(0).expand(3, H, W)
+        img = torch.clamp(img + self.intensity * (pattern - 0.5), 0, 1)
+        self.nested_set(x, img, self.image_label)
+        return x

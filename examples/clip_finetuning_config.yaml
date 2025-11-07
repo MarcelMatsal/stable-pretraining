@@ -25,14 +25,30 @@ trainer:
 
 params:
   seed: 40
-  epochs: 30
+  epochs: 40
   batch_size: 64
   weight_decay: 0.05
-  learning_rate: 1e-4
+  learning_rate: 1e-5
   clip_configuration: openai/clip-vit-base-patch32
-  use_lora: false
+  use_lora: true
   lora_rank: 1
   lora_alpha: 0.2
   use_spurious: false
   spur_type: patch
   lora_dropout: 0.05
+  watermark_path: path
+  watermark_size: 0.2
+  watermark_pos: bottom_right
+  spur_alpha: 0.2
+  spur_color: (0, 1, 0)
+  border_thickness: 0.2
+  patch_size: 0.2
+  patch_color: (0, 1, 0)
+  patch_pos: top_left_corner
+  tint_color: (1.0, 0.8, 0.8)
+  spur_train_label: 0
+  spur_test_label: 0
+  spur_proportion: 1
+  total_train_samples: 50000
+  total_test_sample: 10000
+  use_dora: false
