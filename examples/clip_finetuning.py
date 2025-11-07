@@ -14,9 +14,6 @@ from lightning.pytorch.loggers import WandbLogger
 from torchvision.transforms import ToPILImage
 import types
 import torch.nn as nn
-import sys
-
-sys.stdout.reconfigure(line_buffering=True)
 
 
 to_pil = ToPILImage()
