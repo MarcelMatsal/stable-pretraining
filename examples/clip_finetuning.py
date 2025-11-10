@@ -544,7 +544,7 @@ def main(cfg: DictConfig):
             elif "labels" in item:
                 labels.append(int(item["labels"]))
             elif cfg.params.label_key in item:
-                labels.append(int(item["label"]))
+                labels.append(int(item[cfg.params.label_key]))
             elif "answer" in item:
                 # if 'answer' is a string class name, map to idx
                 labels.append(class_to_idx[item["answer"]])
