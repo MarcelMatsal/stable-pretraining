@@ -671,7 +671,7 @@ def main(cfg: DictConfig):
     zero_shot_callback = clip_zero_shot.CLIPZeroShot(
         name="zeroshot_eval",
         image_key="pixel_values",
-        class_key=cfg.params.label_key,
+        class_key="labels",
         class_names=class_names,
         image_backbone=image_backbone,
         text_backbone=text_backbone,
