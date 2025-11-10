@@ -37,22 +37,125 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)  # For multi-GPU training
 
 
-class_names = [
-    "airplane",
-    "automobile",
-    "bird",
-    "cat",
-    "deer",
-    "dog",
-    "frog",
-    "horse",
-    "ship",
-    "truck",
-]
-
-
 @hydra.main(config_path=".", config_name="clip_finetuning_config", version_base="1.1")
 def main(cfg: DictConfig):
+
+    if cfg.params.dataset == "uoft-cs/cifar10":
+        class_names = [
+            "airplane",
+            "automobile",
+            "bird",
+            "cat",
+            "deer",
+            "dog",
+            "frog",
+            "horse",
+            "ship",
+            "truck",
+        ]
+    elif cfg.params.dataset == "uoft-cs/cifar100":
+        class_names = [
+            "apple",
+            "aquarium_fish",
+            "baby",
+            "bear",
+            "beaver",
+            "bed",
+            "bee",
+            "beetle",
+            "bicycle",
+            "bottle",
+            "bowl",
+            "boy",
+            "bridge",
+            "bus",
+            "butterfly",
+            "camel",
+            "can",
+            "castle",
+            "caterpillar",
+            "cattle",
+            "chair",
+            "chimpanzee",
+            "clock",
+            "cloud",
+            "cockroach",
+            "couch",
+            "cra",
+            "crocodile",
+            "cup",
+            "dinosaur",
+            "dolphin",
+            "elephant",
+            "flatfish",
+            "forest",
+            "fox",
+            "girl",
+            "hamster",
+            "house",
+            "kangaroo",
+            "keyboard",
+            "lamp",
+            "lawn_mower",
+            "leopard",
+            "lion",
+            "lizard",
+            "lobster",
+            "man",
+            "maple_tree",
+            "motorcycle",
+            "mountain",
+            "mouse",
+            "mushroom",
+            "oak_tree",
+            "orange",
+            "orchid",
+            "otter",
+            "palm_tree",
+            "pear",
+            "pickup_truck",
+            "pine_tree",
+            "plain",
+            "plate",
+            "poppy",
+            "porcupine",
+            "possum",
+            "rabbit",
+            "raccoon",
+            "ray",
+            "road",
+            "rocket",
+            "rose",
+            "sea",
+            "seal",
+            "shark",
+            "shrew",
+            "skunk",
+            "skyscraper",
+            "snail",
+            "snake",
+            "spider",
+            "squirrel",
+            "streetcar",
+            "sunflower",
+            "sweet_pepper",
+            "table",
+            "tank",
+            "telephone",
+            "television",
+            "tiger",
+            "tractor",
+            "train",
+            "trout",
+            "tulip",
+            "turtle",
+            "wardrobe",
+            "whale",
+            "willow_tree",
+            "wolf",
+            "woman",
+            "worm"
+            ]
     def forward(self, batch, stage=None):
         out = {}
 
@@ -330,13 +433,13 @@ def main(cfg: DictConfig):
     # )
 
     finetuning_dataset = spt.data.HFDataset(
-        path="uoft-cs/cifar10",
+        path=cfg.params.dataset,
         split="train",
         transform=transform_train,
     )
 
     val_dataset = spt.data.HFDataset(
-        path="uoft-cs/cifar10",
+        path=cfg.params.dataset,
         split="test",
         transform=transform_test,
     )
@@ -357,7 +460,7 @@ def main(cfg: DictConfig):
         return {"image": new_images, "answer": new_texts}
 
     def add_prompt(batch):
-        prompts = [f"a photo of a {class_names[label]}" for label in batch["label"]]
+        prompts = [f"a photo of a {class_names[label]}" for label in batch[cfg.params.label_key]]
         # if "img" in batch and "image" not in batch:
         #     batch["image"] = batch.pop("img")
         batch["answer"] = prompts
@@ -440,6 +543,8 @@ def main(cfg: DictConfig):
                 labels.append(int(item["label"]))
             elif "labels" in item:
                 labels.append(int(item["labels"]))
+            elif cfg.params.label_key in item:
+                labels.append(int(item["label"]))
             elif "answer" in item:
                 # if 'answer' is a string class name, map to idx
                 labels.append(class_to_idx[item["answer"]])
@@ -480,7 +585,7 @@ def main(cfg: DictConfig):
     wandb_logger = WandbLogger(
         entity="rbalestr-brown",
         project="clip_spurious_correlation",
-        name=f"CLIP Finetuning, LoRA: {cfg.params.use_lora}, rank: {cfg.params.lora_rank}, Spurious tokens: {cfg.params.use_spurious}, type: {cfg.params.spur_type}",
+        name=f"CLIP Finetuning on {cfg.params.dataset}, LoRA: {cfg.params.use_lora}, rank: {cfg.params.lora_rank}, Spurious tokens: {cfg.params.use_spurious}, type: {cfg.params.spur_type}",
         config=OmegaConf.to_container(cfg.params, resolve=True),
         log_model=False,
     )
@@ -566,7 +671,7 @@ def main(cfg: DictConfig):
     zero_shot_callback = clip_zero_shot.CLIPZeroShot(
         name="zeroshot_eval",
         image_key="pixel_values",
-        class_key="labels",
+        class_key=cfg.params.label_key,
         class_names=class_names,
         image_backbone=image_backbone,
         text_backbone=text_backbone,
@@ -584,7 +689,7 @@ def main(cfg: DictConfig):
 
     transform_eval = transforms.Compose(transforms.ToImage(source="img", target="img"))
     eval_dataset = spt.data.HFDataset(
-        path="uoft-cs/cifar10",
+        path=cfg.params.dataset,
         split="test",
         transform=transform_eval,
     )

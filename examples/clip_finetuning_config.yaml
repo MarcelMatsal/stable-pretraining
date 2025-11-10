@@ -52,3 +52,5 @@ params:
   total_train_samples: 50000
   total_test_sample: 10000
   use_dora: false
+  dataset: uoft-cs/cifar10
+  label_key: label
