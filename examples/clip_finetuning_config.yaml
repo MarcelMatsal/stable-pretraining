@@ -54,5 +54,5 @@ params:
   use_dora: false
   dataset: uoft-cs/cifar100
   label_key: fine_label
-  zeroshot_dataset: uoft-cs/cifar10
-  zero_label: label
+  zeroshot_dataset: uoft-cs/cifar100
+  zero_label: fine_label
