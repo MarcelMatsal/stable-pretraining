@@ -800,8 +800,8 @@ def main(cfg: DictConfig):
             truncation=True,
         )["input_ids"],
         metrics={
-            "top1": tm.classification.MulticlassAccuracy(len(class_names)),
-            "top5": tm.classification.MulticlassAccuracy(len(class_names), top_k=5),
+            "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
+            "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
         },
     )
 
