@@ -733,9 +733,9 @@ def main(cfg: DictConfig):
     )
 
     # pretrain the MAE Vit backbone and save the model locally
-    # manager = spt.Manager(trainer=trainer, module=module, data=data)
-    # module.backbone.train()
-    # manager()
+    manager = spt.Manager(trainer=trainer, module=module, data=data)
+    module.backbone.train()
+    manager()
 
     torch.save(clip_model.state_dict(), "finetuned_clip_no_lora_no_spur.pt")
 
