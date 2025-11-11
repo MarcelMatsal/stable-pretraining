@@ -55,3 +55,4 @@ params:
   dataset: uoft-cs/cifar100
   label_key: fine_label
   zeroshot_dataset: uoft-cs/cifar10
+  zero_label: label

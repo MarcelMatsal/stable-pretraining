@@ -660,8 +660,8 @@ def main(cfg: DictConfig):
                 labels.append(int(item["label"]))
             elif "labels" in item:
                 labels.append(int(item["labels"]))
-            elif cfg.params.label_key in item:
-                labels.append(int(item[cfg.params.label_key]))
+            elif cfg.params.zero_label in item:
+                labels.append(int(item[cfg.params.zero_label]))
             elif "answer" in item:
                 # if 'answer' is a string class name, map to idx
                 labels.append(class_to_idx[item["answer"]])
@@ -732,9 +732,9 @@ def main(cfg: DictConfig):
     )
 
     # pretrain the MAE Vit backbone and save the model locally
-    manager = spt.Manager(trainer=trainer, module=module, data=data)
-    module.backbone.train()
-    manager()
+    # manager = spt.Manager(trainer=trainer, module=module, data=data)
+    # module.backbone.train()
+    # manager()
 
     torch.save(clip_model.state_dict(), "finetuned_clip_no_lora_no_spur.pt")
 
