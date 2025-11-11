@@ -311,6 +311,7 @@ def main(cfg: DictConfig):
     # get model from huggingface (Vit-B/32: openai/clip-vit-base-patch32)
     clip_model = CLIPModel.from_pretrained(cfg.params.clip_configuration)
     processor = CLIPProcessor.from_pretrained(cfg.params.clip_configuration)
+    zero_processor = CLIPProcessor.from_pretrained(cfg.params.clip_configuration)
 
     if cfg.params.use_lora:
         lora_config = LoraConfig(
@@ -672,7 +673,7 @@ def main(cfg: DictConfig):
                 # fallback: None (will break later, but this is explicit)
                 labels.append(None)
 
-        proc = processor(
+        proc = zero_processor(
             images=images, return_tensors="pt", padding=True, truncation=True
         )
         # convert labels to tensor, but first ensure no None
@@ -792,7 +793,7 @@ def main(cfg: DictConfig):
         class_names=zero_class_names,
         image_backbone=image_backbone,
         text_backbone=text_backbone,
-        tokenizer_fn=lambda x: processor.tokenizer(
+        tokenizer_fn=lambda x: zero_processor.tokenizer(
             [f"a photo of a {c}" for c in x],
             return_tensors="pt",
             padding=True,
