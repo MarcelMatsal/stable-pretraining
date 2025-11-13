@@ -446,7 +446,7 @@ def main(cfg: DictConfig):
                     seed=cfg.params.seed,
                 ),
             )
-            transform_eval = stransforms.Compose(
+            transform_eval = transforms.Compose(
                 transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
@@ -881,7 +881,7 @@ def main(cfg: DictConfig):
         },
     )
 
-    transform_eval = transforms.Compose(transforms.ToImage(source="img", target="img"))
+    # transform_eval = transforms.Compose(transforms.ToImage(source="img", target="img"))
     eval_dataset = spt.data.HFDataset(
         path=cfg.params.zeroshot_dataset,
         split="test",
