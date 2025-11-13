@@ -40,7 +40,7 @@ params:
   watermark_size: 0.2
   watermark_pos: bottom_right
   spur_alpha: 0.2
-  spur_color: (0, 1, 0)
+  spur_color: [0, 1, 0]
   border_thickness: 0.2
   patch_size: 0.2
   patch_color: (0, 1, 0)
