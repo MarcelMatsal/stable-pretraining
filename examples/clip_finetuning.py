@@ -864,9 +864,11 @@ def main(cfg: DictConfig):
 
     text_backbone = CLIPTextWrapper(clip_model)
     image_backbone = CLIPImageWrapper(clip_model)
-    # Setup the zero shot evaluation (CIFAR10)
+
+
+    # Setup the zero shot evaluation on spurious data
     zero_shot_callback = clip_zero_shot.CLIPZeroShot(
-        name="zeroshot_eval",
+        name="zeroshot_eval_spur",
         image_key="pixel_values",
         class_key="labels",
         class_names=zero_class_names,
@@ -912,6 +914,55 @@ def main(cfg: DictConfig):
 
     eval_module.validation_step = types.MethodType(validation_step, eval_module)
     eval_trainer.validate(model=eval_module, dataloaders=eval_dataloader)
+
+    # Setup the zero shot evaluation on clean data
+    zero_shot_callback_clean = clip_zero_shot.CLIPZeroShot(
+        name="zeroshot_eval_clean",
+        image_key="pixel_values",
+        class_key="labels",
+        class_names=zero_class_names,
+        image_backbone=image_backbone,
+        text_backbone=text_backbone,
+        tokenizer_fn=lambda x: zero_processor.tokenizer(
+            [f"a photo of a {c}" for c in x],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )["input_ids"],
+        metrics={
+            "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
+            "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
+        },
+    )
+
+    transform_eval_clean = transforms.Compose(transforms.ToImage(source="img", target="img"))
+    eval_dataset_clean = spt.data.HFDataset(
+        path=cfg.params.zeroshot_dataset,
+        split="test",
+        transform=transform_eval_clean,
+    )
+
+    eval_dataloader_clean = torch.utils.data.DataLoader(
+        dataset=eval_dataset_clean,
+        batch_size=cfg.params.batch_size,
+        collate_fn=zero_shot_collate_fn,
+        num_workers=8,
+    )
+
+    eval_trainer_clean = pl.Trainer(
+        precision="16-mixed",
+        callbacks=[zero_shot_callback_clean],
+        logger=wandb_logger,
+    )
+
+    eval_module_clean = spt.Module(
+        backbone=clip_model,
+        forward=forward,
+        hparams=cfg,
+    )
+
+    eval_module_clean.validation_step = types.MethodType(validation_step, eval_module_clean)
+    eval_trainer_clean.validate(model=eval_module_clean, dataloaders=eval_dataloader_clean)
 
 
 if __name__ == "__main__":
