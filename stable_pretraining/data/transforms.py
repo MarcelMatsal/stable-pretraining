@@ -1404,7 +1404,7 @@ class AddPatch(Transform):
         img_key: str = "img"
     ):
         super().__init__()
-        self.text_key = text_key
+        self.img_key = img_key
 
         # checking constraints
         if patch_size <= 0 or patch_size > 1:
@@ -1426,7 +1426,7 @@ class AddPatch(Transform):
         self.position = position
 
     def __call__(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        img = self.nested_get(x, self.text_key)
+        img = self.nested_get(x, self.img_key)
         _, H, W = img.shape
 
         patch_h = int(H * self.patch_size)
@@ -1460,7 +1460,7 @@ class AddPatch(Transform):
              top_left_corner, top_right_corner, bottom_left_corner, bottom_right_corner, center"
             )
 
-        self.nested_set(x, img, self.text_key)
+        self.nested_set(x, img, self.img_key)
         return x
 
 
