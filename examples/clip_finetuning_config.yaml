@@ -43,7 +43,7 @@ params:
   spur_color: [0, 1, 0]
   border_thickness: 0.2
   patch_size: 0.2
-  patch_color: (0, 1, 0)
+  patch_color: [0, 1, 0]
   patch_pos: top_left_corner
   tint_color: (1.0, 0.8, 0.8)
   spur_train_label: 0
