@@ -782,7 +782,7 @@ def main(cfg: DictConfig):
     wandb_logger = WandbLogger(
         entity="rbalestr-brown",
         project="clip_spurious_correlation",
-        name=f"CLIP Finetuning on {cfg.params.dataset} zeroshot on {cfg.params.zeroshot_dataset}, LoRA: {cfg.params.use_lora}, rank: {cfg.params.lora_rank}, Using Spur: {cfg.params.use_spurious} Spurious tokens: {cfg.params.use_spurious}, type: {cfg.params.spur_type} alpha: {cfg.params.spur_alpha}, proportion: {cfg.params.spur_proportion}",
+        name=f"CLIP Finetuning on {cfg.params.dataset} zeroshot on {cfg.params.zeroshot_dataset}, LoRA: {cfg.params.use_lora}, rank: {cfg.params.lora_rank}, Using Spur: {cfg.params.use_spurious} Spurious tokens: {cfg.params.use_spurious}, type: {cfg.params.spur_type} alpha: {cfg.params.spur_alpha}, patch size: {cfg.params.patch_size} proportion: {cfg.params.spur_proportion}",
         config=OmegaConf.to_container(cfg.params, resolve=True),
         log_model=False,
     )
