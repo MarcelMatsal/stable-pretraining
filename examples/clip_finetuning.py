@@ -470,8 +470,9 @@ def main(cfg: DictConfig):
                         patch_size=cfg.params.patch_size,
                         color=tuple(cfg.params.patch_color),
                         position=cfg.params.patch_pos,
+                        text_key=cfg.params.label_key
                     ),
-                    label_key="label",
+                    label_key=cfg.params.label_key,
                     target_labels=cfg.params.spur_train_label,
                     proportion=cfg.params.spur_proportion,
                     total_samples=cfg.params.total_train_samples,
@@ -486,8 +487,9 @@ def main(cfg: DictConfig):
                         patch_size=cfg.params.patch_size,
                         color=cfg.params.patch_color,
                         position=cfg.params.patch_pos,
+                        text_key=cfg.params.label_key
                     ),
-                    label_key="label",
+                    label_key=cfg.params.label_key,
                     target_labels=cfg.params.spur_test_label,
                     proportion=cfg.params.spur_proportion,
                     total_samples=cfg.params.total_test_samples,
@@ -502,8 +504,9 @@ def main(cfg: DictConfig):
                         patch_size=cfg.params.patch_size,
                         color=cfg.params.patch_color,
                         position=cfg.params.patch_pos,
+                        text_key=cfg.params.zero_label
                     ),
-                    label_key="label",
+                    label_key=cfg.params.zero_label,
                     target_labels=cfg.params.spur_test_label,
                     proportion=cfg.params.spur_proportion,
                     total_samples=cfg.params.total_test_samples,
