@@ -398,6 +398,23 @@ def main(cfg: DictConfig):
                     seed=cfg.params.seed,
                 ),
             )
+            transform_eval = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddWatermark(
+                        watermark=cfg.params.watermark_path,
+                        size=cfg.params.watermark_size,
+                        position=cfg.params.watermak_pos,
+                        alpha=cfg.params.spur_alpha,
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
         elif cfg.params.spur_type == "border":
             transform_train = stransforms.Compose(
                 transforms.ToImage(source="img", target="img"),
@@ -415,6 +432,21 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_test = stransforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddBorder(
+                        thickness=cfg.params.border_thickness,
+                        color=cfg.params.spur_color,
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+            transform_eval = stransforms.Compose(
                 transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
@@ -462,6 +494,22 @@ def main(cfg: DictConfig):
                     seed=cfg.params.seed,
                 ),
             )
+            transform_eval = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddPatch(
+                        patch_size=cfg.params.patch_size,
+                        color=cfg.params.patch_color,
+                        position=cfg.params.patch_pos,
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
         elif cfg.params.spur_type == "tint":
             transform_train = transforms.Compose(
                 transforms.ToImage(source="img", target="img"),
@@ -478,6 +526,20 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_test = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddColorTint(
+                        tint=cfg.params.tint_color, alpha=cfg.params.spur_alpha
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+            transform_eval = transforms.Compose(
                 transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
@@ -508,6 +570,20 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_test = transforms.Compose(
+                transforms.ToImage(source="img", target="img"),
+                transforms.AddSampleIdx(),
+                transforms.ClassConditionalInjector(
+                    transformation=transforms.AddCheckerboardPattern(
+                        intensity=cfg.params.spur_alpha, image_label="img"
+                    ),
+                    label_key="label",
+                    target_labels=cfg.params.spur_test_label,
+                    proportion=cfg.params.spur_proportion,
+                    total_samples=cfg.params.total_test_samples,
+                    seed=cfg.params.seed,
+                ),
+            )
+            transform_eval = transforms.Compose(
                 transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
@@ -703,7 +779,7 @@ def main(cfg: DictConfig):
     wandb_logger = WandbLogger(
         entity="rbalestr-brown",
         project="clip_spurious_correlation",
-        name=f"CLIP Finetuning on {cfg.params.dataset}, LoRA: {cfg.params.use_lora}, rank: {cfg.params.lora_rank}, Spurious tokens: {cfg.params.use_spurious}, type: {cfg.params.spur_type}",
+        name=f"CLIP Finetuning on {cfg.params.dataset} zeroshot on {cfg.params.zeroshot_dataset}, LoRA: {cfg.params.use_lora}, rank: {cfg.params.lora_rank}, Using Spur: {cfg.params.use_spurious} Spurious tokens: {cfg.params.use_spurious}, type: {cfg.params.spur_type} alpha: {cfg.params.spur_alpha}, proportion: {cfg.params.spur_proportion}",
         config=OmegaConf.to_container(cfg.params, resolve=True),
         log_model=False,
     )
