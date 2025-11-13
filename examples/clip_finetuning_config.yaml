@@ -50,7 +50,7 @@ params:
   spur_test_label: [0,1]
   spur_proportion: 0.8
   total_train_samples: 50000
-  total_test_sample: 10000
+  total_test_samples: 10000
   use_dora: false
   dataset: uoft-cs/cifar100
   label_key: fine_label
