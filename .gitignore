@@ -160,3 +160,4 @@ wandb/
 *.out
 
 ._version.py
+!examples/clip_runs.sh
