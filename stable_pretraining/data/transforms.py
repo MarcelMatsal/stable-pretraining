@@ -1401,7 +1401,7 @@ class AddPatch(Transform):
         patch_size: float = 0.1,
         color: Tuple[float, float, float] = (1.0, 0.0, 0.0),
         position: str = "bottom_right_corner",
-        text_key: str = "img"
+        img_key: str = "img"
     ):
         super().__init__()
         self.text_key = text_key
