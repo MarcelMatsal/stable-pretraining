@@ -1409,6 +1409,7 @@ class AddPatch(Transform):
             raise ValueError("patch_size must be between 0 and 1.")
 
         if len(color) != 3:
+            print(f"the color passed in is: {color}")
             raise ValueError(
                 "color must be a tuple of size 3 in the form \
              Tuple[float, float, float]) with each representing RGB values in [0, 1]"
