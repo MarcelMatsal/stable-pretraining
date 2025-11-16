@@ -24,7 +24,7 @@ for seed in 40; do
 
                 echo "Running with alpha=$alpha, lora_rank=$lora_rank, proportion=$proportion, seed=$seed"
 
-                python clip_finetuning.py ++params.dataset=uoft-cs/cifar10 ++params.label_key=label ++params.zeroshot_dataset=uoft-cs/cifar10 ++params.zero_label=label ++params.use_lora=False ++params.lora_rank=$lora_rank ++params.spur_proportion=$proportion ++params.patch_size=$patch_size ++params.use_spurious=True
+                python clip_finetuning.py ++params.dataset=uoft-cs/cifar10 ++params.label_key=label ++params.zeroshot_dataset=uoft-cs/cifar10 ++params.zero_label=label ++params.use_lora=False ++params.lora_rank=$lora_rank ++params.spur_proportion=$proportion ++params.patch_size=$patch_size ++params.use_spurious=True "$@"
 
             done
         done
