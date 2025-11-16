@@ -47,7 +47,7 @@ params:
   patch_pos: top_left_corner
   tint_color: (1.0, 0.8, 0.8)
   spur_train_label: 0
-  spur_test_label: [0,1]
+  spur_test_label: 0
   spur_proportion: 0.8
   total_train_samples: 50000
   total_test_samples: 10000

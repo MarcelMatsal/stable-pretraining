@@ -468,7 +468,7 @@ def main(cfg: DictConfig):
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddPatch(
                         patch_size=cfg.params.patch_size,
-                        color=tuple(cfg.params.patch_color),
+                        color=cfg.params.patch_color,
                         position=cfg.params.patch_pos,
                         img_key=cfg.params.image_key
                     ),
