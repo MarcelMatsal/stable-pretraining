@@ -39,6 +39,30 @@ except ModuleNotFoundError:
 # Common Utilities
 # ============================================================================
 
+def _wandb_run_packed(args):
+    (
+        entity,
+        project,
+        run_id,
+        min_step,
+        max_step,
+        keys,
+        num_workers,
+    ) = args
+
+    # Must create reader in the worker process
+    reader = WandbLogReader(num_workers=num_workers)
+
+    return reader.read(
+        entity,
+        project,
+        run_id,
+        min_step,
+        max_step,
+        keys,
+        _tqdm_disable=True,
+    )
+
 
 def alphanum_key(key: str) -> List[Union[int, str]]:
     """Convert a string to a list of mixed numbers and strings for natural sorting."""
@@ -309,20 +333,30 @@ class WandbLogReader(LogReader):
                 data.append(run_data)
             return pd.DataFrame.from_records(data)
 
-        def _run_packed(args):
-            return self.read(*args, _tqdm_disable=True)
+        # def _run_packed(args):
+        #     return self.read(*args, _tqdm_disable=True)
+
+        run_ids = [r.id for r in runs]   # <-- critical!
 
         with Pool(self.num_workers) as p:
             results = list(
                 tqdm(
                     p.imap(
-                        _run_packed,
+                        _wandb_run_packed,
                         [
-                            (entity, project, r.id, min_step, max_step, keys)
-                            for r in runs
+                            (
+                                entity,
+                                project,
+                                run_id,     # <-- pass ID only (string)
+                                min_step,
+                                max_step,
+                                keys,
+                                self.num_workers, 
+                            )
+                            for run_id in run_ids
                         ],
                     ),
-                    total=len(runs),
+                    total=len(run_ids),
                     desc=f"Downloading project: {project}",
                 )
             )

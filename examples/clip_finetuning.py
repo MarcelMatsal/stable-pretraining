@@ -563,7 +563,7 @@ def main(cfg: DictConfig):
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddCheckerboardPattern(
-                        intensity=cfg.params.spur_alpha, image_label="img"
+                        intensity=cfg.params.spur_alpha, image_label=cfg.params.image_key
                     ),
                     label_key="label",
                     target_labels=cfg.params.spur_train_label,
@@ -577,7 +577,7 @@ def main(cfg: DictConfig):
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddCheckerboardPattern(
-                        intensity=cfg.params.spur_alpha, image_label="img"
+                        intensity=cfg.params.spur_alpha, image_label=cfg.params.image_key
                     ),
                     label_key="label",
                     target_labels=cfg.params.spur_test_label,
@@ -591,7 +591,7 @@ def main(cfg: DictConfig):
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddCheckerboardPattern(
-                        intensity=cfg.params.spur_alpha, image_label="img"
+                        intensity=cfg.params.spur_alpha, image_label=cfg.params.image_key
                     ),
                     label_key="label",
                     target_labels=cfg.params.spur_test_label,

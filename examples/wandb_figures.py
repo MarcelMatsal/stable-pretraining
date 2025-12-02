@@ -10,8 +10,8 @@ from tqdm import tqdm
 
 import stable_pretraining as spt
 
-entity = "[YOUR ENTITY HERE]"
-project = "[YOUR PROJECT HERE]"
+entity = "rbalestr-brown"
+project = "clip_spurious_correlation"
 
 
 # want to retrieve finished runs from wandb
@@ -22,9 +22,8 @@ configs, dfs = spt.reader.wandb_project(
 # Here you would define wanted conditions that you can use to narrow down the WandB runs, if you want to access all your runs
 # in the project then you would not define anything here and would remove the first if statement in the for loop
 # access all runs with the wanted dataset and model backbone
-wanted_dataset = "imdb"
-wanted_backbone = "Snowflake/snowflake-arctic-embed-xs"
-
+wanted_dataset = "uoft-cs/cifar10"
+wanted_zeroshot_dataset = "uoft-cs/cifar10"
 
 # This section allows for the users to define the information they want to separate the runs into to later be plotted
 # for this example, we are dividing the data based on rank and location. We are the going to plot the spurious_proportion on the
@@ -36,7 +35,7 @@ results = {
         loc: {"spurious_proportion": [], "balanced_accuracy": []}
         for loc in ["random", "end", "beginning"]
     }
-    for rank in [0, 2, 32]
+    for rank in [1, 16, 32, 64]
 }
 
 # Iterate through runs and gather information from WandB
@@ -44,45 +43,49 @@ for run_id, df in tqdm(dfs.items(), desc="Processing runs", unit="run"):
     # Get the dataset, backbone, and run name from the WandB runs, this allows us to focus on the runs for specific conditions
     # we want to plot (ex we only want to plot runs for a specific dataset and backbone)
     dataset = df.get("dataset", None)
-    backbone = df.get("backbone", None)
+    zeroshot_dataset = df.get("zeroshot_dataset", None)
+    # backbone = df.get("backbone", None)
     run_name = df.get("run_name", None)
 
     # make sure the ones we are using met the conditions for what we want to graph
     if (
         wanted_dataset.lower() in dataset.lower()
-        and wanted_backbone.lower() in backbone.lower()
+        and wanted_zeroshot_dataset.lower() in zeroshot_dataset.lower()
     ):
         # Extract spurious correlation proportion, location, and lora_rank used
-        spurious_proportion = df.get("spurious_proportion", None)
-        spurious_location = df.get("spurious_location", None)
+        spurious_proportion = df.get("spur_proportion", None)
+        # spurious_location = df.get("spurious_location", None
         lora_rank = df.get("lora_rank", None)
         use_spurious = df.get("use_spurious", None)
-        using_list = df.get("use_list_dataset", None)
+        # using_list = df.get("use_list_dataset", None)
 
         # This if statement allows us to exclude runs we dont want to plot, you can change it based on your needs
         # only access if it contains everything wanted
         if (
             spurious_proportion is not None
-            and spurious_location is not None
             and spurious_proportion >= 0
             and lora_rank is not None
             and use_spurious
-            and using_list is None
         ):
             # Extract balanced accuracy from the run
             new_df, config = spt.reader.wandb(entity, project, run_id)
             # drop the ones that are NAN
-            balanced_acc = new_df["eval/NonSpurious_balanced_accuracy"].dropna()
+            spur_top1 = new_df["val/zeroshot_eval_spur_top1"].dropna()
+            spur_top5 = new_df["val/zeroshot_eval_spur_top1"].dropna()
+            clean_top1 = new_df["val/zeroshot_eval_clean_top1"].dropna()
+            clean_top5 = new_df["val/zeroshot_eval_clean_top5"].dropna()
 
             # Add the last one to be plotted
-            if not balanced_acc.empty:
-                balanced_acc = balanced_acc.iloc[-1]  # Get the final valid accuracy
-                results[lora_rank][spurious_location]["spurious_proportion"].append(
-                    spurious_proportion
-                )
-                results[lora_rank][spurious_location]["balanced_accuracy"].append(
-                    balanced_acc
-                )
+
+
+            # if not balanced_acc.empty:
+            #     balanced_acc = balanced_acc.iloc[-1]  # Get the final valid accuracy
+            #     results[lora_rank][spurious_location]["spurious_proportion"].append(
+            #         spurious_proportion
+            #     )
+            #     results[lora_rank][spurious_location]["balanced_accuracy"].append(
+            #         balanced_acc
+            #     )
 
 
 # Functions used to simplify the plotting process, making it more extensible

@@ -7,6 +7,7 @@ configuration management.
 """
 
 # Import from submodules for backward compatibility
+from .log_reader import WandbLogReader
 from .gdrive_utils import GDriveUploader
 from .batch_utils import get_data_from_batch_or_outputs, detach_tensors
 from .config import (
