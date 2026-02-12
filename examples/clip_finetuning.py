@@ -14,6 +14,7 @@ from lightning.pytorch.loggers import WandbLogger
 from torchvision.transforms import ToPILImage
 import types
 import torch.nn as nn
+import random
 
 
 to_pil = ToPILImage()
@@ -37,8 +38,13 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)  # For multi-GPU training
 
 
+
+
+
 @hydra.main(config_path=".", config_name="clip_finetuning_config", version_base="1.1")
 def main(cfg: DictConfig):
+
+    text_rng = np.random.RandomState(cfg.params.seed)
 
     if cfg.params.dataset == "uoft-cs/cifar10":
         class_names = [
@@ -273,6 +279,8 @@ def main(cfg: DictConfig):
             "woman",
             "worm"
             ]
+    
+    TEXT_SPUR_TRAIN_LABELS = {class_names.index(cfg.params.target_spur_class)}
     def forward(self, batch, stage=None):
         out = {}
 
@@ -305,6 +313,33 @@ def main(cfg: DictConfig):
         pixel_values = batch.get("pixel_values")
         labels = batch.get("labels")
         return {"pixel_values": pixel_values, "labels": labels}
+    
+
+    def should_trigger(idx: int, label: int, *, seed: int, proportion: float, target_labels: set) -> bool:
+        if label not in target_labels:
+            return False
+        # deterministic pseudo-random in [0,1)
+        u = (hash((seed, idx)) % 10_000_000) / 10_000_000
+        return u < proportion
+
+    def add_trigger(prompt: str, trigger: str, position: str) -> str:
+        if position == "prepend":
+            return f"{trigger} {prompt}"
+        return f"{prompt} {trigger}"
+
+    def add_prompt_train(batch, indices):
+        labels = batch[cfg.params.label_key]
+        prompts = []
+        for idx, lab in zip(indices, labels):
+            lab = int(lab)
+            base = f"a photo of a {class_names[lab]}"
+            if cfg.params.text_spur and should_trigger(
+                idx, lab, seed=cfg.params.seed, proportion=cfg.params.spur_proportion, target_labels=TEXT_SPUR_TRAIN_LABELS
+            ):
+                base = add_trigger(base, cfg.params.spur_text_trigger, cfg.params.text_spur_location)
+            prompts.append(base)
+        batch["answer"] = prompts
+        return batch
 
     set_seed(cfg.params.seed)
 
@@ -663,6 +698,22 @@ def main(cfg: DictConfig):
         batch["answer"] = prompts
         return batch
 
+    # def add_prompt_train(batch):
+    #     labels = batch[cfg.params.label_key]
+    #     prompts = []
+    #     for label in labels:
+    #         base = f"a photo of a {class_names[int(label)]}"
+    #         prompts.append(maybe_add_text_trigger(base, int(label)))
+    #     batch["answer"] = prompts
+    #     return batch
+
+    def add_prompt_eval_clean(batch):
+        labels = batch[cfg.params.label_key]
+        batch["answer"] = [f"a photo of a {class_names[int(label)]}" for label in labels]
+        return batch
+
+
+
     # finetuning_dataset.dataset = finetuning_dataset.dataset.map(
     #     expand_captions,
     #     batched=True,
@@ -674,11 +725,18 @@ def main(cfg: DictConfig):
     # )
 
     finetuning_dataset.dataset = finetuning_dataset.dataset.map(
-        add_prompt, batched=True, remove_columns=[]
+        add_prompt_train, batched=True, with_indices=True, remove_columns=[], load_from_cache_file=False
     )
     val_dataset.dataset = val_dataset.dataset.map(
-        add_prompt, batched=True, remove_columns=[]
+        add_prompt, batched=True, remove_columns=[], load_from_cache_file=False
     )
+
+    # finetuning_dataset.dataset = finetuning_dataset.dataset.map(
+    #     add_prompt, batched=True, remove_columns=[]
+    # )
+    # val_dataset.dataset = val_dataset.dataset.map(
+    #     add_prompt, batched=True, remove_columns=[]
+    # )
 
     # Use the pretrained processor
     def preprocess(example):
@@ -694,9 +752,9 @@ def main(cfg: DictConfig):
         )
 
     finetuning_dataset.dataset = finetuning_dataset.dataset.map(
-        preprocess, batched=True
+        preprocess, batched=True, load_from_cache_file=False
     )
-    val_dataset.dataset = val_dataset.dataset.map(preprocess, batched=True)
+    val_dataset.dataset = val_dataset.dataset.map(preprocess, batched=True, load_from_cache_file=False)
 
     def finetune_collate_fn(batch):
         # batch is list of items; each item has {"image": <tensor or PIL>, "text": <str>, ...}
@@ -781,8 +839,8 @@ def main(cfg: DictConfig):
     data = spt.data.DataModule(train=finetune_dataloader, val=val_dataloader)
     wandb_logger = WandbLogger(
         entity="rbalestr-brown",
-        project="clip_spurious_correlation",
-        name=f"CLIP Finetuning on {cfg.params.dataset} zeroshot on {cfg.params.zeroshot_dataset}, LoRA: {cfg.params.use_lora}, rank: {cfg.params.lora_rank}, Using Spur: {cfg.params.use_spurious} Spurious tokens: {cfg.params.use_spurious}, type: {cfg.params.spur_type} alpha: {cfg.params.spur_alpha}, patch size: {cfg.params.patch_size} proportion: {cfg.params.spur_proportion}",
+        project="clip_caption_injection",
+        name=f"CLIP finetuning, with spurious text, injecting text into caption of cat",
         config=OmegaConf.to_container(cfg.params, resolve=True),
         log_model=False,
     )
@@ -865,26 +923,61 @@ def main(cfg: DictConfig):
     text_backbone = CLIPTextWrapper(clip_model)
     image_backbone = CLIPImageWrapper(clip_model)
 
+    if cfg.params.text_spur:
 
-    # Setup the zero shot evaluation on spurious data
-    zero_shot_callback = clip_zero_shot.CLIPZeroShot(
-        name="zeroshot_eval_spur",
-        image_key="pixel_values",
-        class_key="labels",
-        class_names=zero_class_names,
-        image_backbone=image_backbone,
-        text_backbone=text_backbone,
-        tokenizer_fn=lambda x: zero_processor.tokenizer(
-            [f"a photo of a {c}" for c in x],
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-        )["input_ids"],
-        metrics={
-            "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
-            "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
-        },
-    )
+        def tokenizer_fn_single_class_trigger(class_list):
+            prompts = []
+            for c in class_list:
+                base = f"a photo of a {c}"
+                if cfg.params.text_spur and (c == cfg.params.target_spur_class):
+                    base = f"{base} {cfg.params.spur_text_trigger}"  # or prepend if you want consistency
+                prompts.append(base)
+
+            toks = zero_processor.tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            )
+            # return dict so your CLIPTextWrapper can pick up attention_mask too
+            return {"input_ids": toks["input_ids"], "attention_mask": toks["attention_mask"]}
+
+        zero_shot_callback = clip_zero_shot.CLIPZeroShot(
+            name="zeroshot_eval_single_class_text_trigger",
+            image_key="pixel_values",
+            class_key="labels",
+            class_names=zero_class_names,
+            image_backbone=image_backbone,
+            text_backbone=text_backbone,
+            tokenizer_fn=tokenizer_fn_single_class_trigger,
+            metrics={
+                "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
+                "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
+            },
+        )
+    
+    else:
+
+
+        # Setup the zero shot evaluation on spurious data
+        zero_shot_callback = clip_zero_shot.CLIPZeroShot(
+            name="zeroshot_eval_spur",
+            image_key="pixel_values",
+            class_key="labels",
+            class_names=zero_class_names,
+            image_backbone=image_backbone,
+            text_backbone=text_backbone,
+            tokenizer_fn=lambda x: zero_processor.tokenizer(
+                [f"a photo of a {c}" for c in x],
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            )["input_ids"],
+            metrics={
+                "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
+                "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
+            },
+        )
 
     # transform_eval = transforms.Compose(transforms.ToImage(source="img", target="img"))
     eval_dataset = spt.data.HFDataset(
