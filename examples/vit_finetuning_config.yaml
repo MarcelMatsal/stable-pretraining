@@ -1,0 +1,24 @@
+params:
+  # Model
+  vit_configuration: "google/vit-base-patch16-224"
+
+  # Data
+  dataset: "uoft-cs/cifar10"
+  label_key: "label"
+  batch_size: 32
+
+  # Training
+  epochs: 1
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  seed: 42
+
+  # LoRA (set use_lora: false to skip it)
+  use_lora: false
+  lora_rank: 4
+  lora_alpha: 16
+  lora_dropout: 0.1
+
+  # Spurious (set use_spurious: false to skip)
+  use_spurious: false
+  spur_type: null
