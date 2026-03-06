@@ -21,11 +21,11 @@ trainer:
   loss:
     with_bias: true
   hardware:
-    world_size: 1  # Set based on number of GPUs using
+    world_size: 1
 
 params:
   seed: 40
-  epochs: 1
+  epochs: 50
   batch_size: 64
   weight_decay: 0.05
   learning_rate: 1e-5
@@ -58,7 +58,7 @@ params:
   zeroshot_dataset: uoft-cs/cifar10
   zero_label: label
   text_spur: true
-  spur_text_label: 0
+  spur_text_labels: [0, 1]
   text_spur_location: append
   target_spur_class: cat
   spur_text_trigger: cftrigger

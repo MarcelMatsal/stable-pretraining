@@ -21,7 +21,6 @@ to_pil = ToPILImage()
 
 
 def count_lora_params(peft_model):
-    """Count trainable LoRA parameters inside a PEFT-wrapped model."""
     total, lora_total = 0, 0
     for name, p in peft_model.named_parameters():
         total += p.numel()
@@ -31,14 +30,9 @@ def count_lora_params(peft_model):
 
 
 def set_seed(seed: int):
-    """Function that sets all the seeds to make our results reproducible."""
-
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # For multi-GPU training
-
-
-
+    torch.cuda.manual_seed_all(seed)
 
 
 @hydra.main(config_path=".", config_name="clip_finetuning_config", version_base="1.1")
@@ -48,256 +42,67 @@ def main(cfg: DictConfig):
 
     if cfg.params.dataset == "uoft-cs/cifar10":
         class_names = [
-            "airplane",
-            "automobile",
-            "bird",
-            "cat",
-            "deer",
-            "dog",
-            "frog",
-            "horse",
-            "ship",
-            "truck",
+            "airplane", "automobile", "bird", "cat", "deer",
+            "dog", "frog", "horse", "ship", "truck",
         ]
     elif cfg.params.dataset == "uoft-cs/cifar100":
         class_names = [
-            "apple",
-            "aquarium_fish",
-            "baby",
-            "bear",
-            "beaver",
-            "bed",
-            "bee",
-            "beetle",
-            "bicycle",
-            "bottle",
-            "bowl",
-            "boy",
-            "bridge",
-            "bus",
-            "butterfly",
-            "camel",
-            "can",
-            "castle",
-            "caterpillar",
-            "cattle",
-            "chair",
-            "chimpanzee",
-            "clock",
-            "cloud",
-            "cockroach",
-            "couch",
-            "cra",
-            "crocodile",
-            "cup",
-            "dinosaur",
-            "dolphin",
-            "elephant",
-            "flatfish",
-            "forest",
-            "fox",
-            "girl",
-            "hamster",
-            "house",
-            "kangaroo",
-            "keyboard",
-            "lamp",
-            "lawn_mower",
-            "leopard",
-            "lion",
-            "lizard",
-            "lobster",
-            "man",
-            "maple_tree",
-            "motorcycle",
-            "mountain",
-            "mouse",
-            "mushroom",
-            "oak_tree",
-            "orange",
-            "orchid",
-            "otter",
-            "palm_tree",
-            "pear",
-            "pickup_truck",
-            "pine_tree",
-            "plain",
-            "plate",
-            "poppy",
-            "porcupine",
-            "possum",
-            "rabbit",
-            "raccoon",
-            "ray",
-            "road",
-            "rocket",
-            "rose",
-            "sea",
-            "seal",
-            "shark",
-            "shrew",
-            "skunk",
-            "skyscraper",
-            "snail",
-            "snake",
-            "spider",
-            "squirrel",
-            "streetcar",
-            "sunflower",
-            "sweet_pepper",
-            "table",
-            "tank",
-            "telephone",
-            "television",
-            "tiger",
-            "tractor",
-            "train",
-            "trout",
-            "tulip",
-            "turtle",
-            "wardrobe",
-            "whale",
-            "willow_tree",
-            "wolf",
-            "woman",
-            "worm"
-            ]
+            "apple", "aquarium_fish", "baby", "bear", "beaver", "bed", "bee", "beetle",
+            "bicycle", "bottle", "bowl", "boy", "bridge", "bus", "butterfly", "camel",
+            "can", "castle", "caterpillar", "cattle", "chair", "chimpanzee", "clock",
+            "cloud", "cockroach", "couch", "cra", "crocodile", "cup", "dinosaur",
+            "dolphin", "elephant", "flatfish", "forest", "fox", "girl", "hamster",
+            "house", "kangaroo", "keyboard", "lamp", "lawn_mower", "leopard", "lion",
+            "lizard", "lobster", "man", "maple_tree", "motorcycle", "mountain", "mouse",
+            "mushroom", "oak_tree", "orange", "orchid", "otter", "palm_tree", "pear",
+            "pickup_truck", "pine_tree", "plain", "plate", "poppy", "porcupine", "possum",
+            "rabbit", "raccoon", "ray", "road", "rocket", "rose", "sea", "seal", "shark",
+            "shrew", "skunk", "skyscraper", "snail", "snake", "spider", "squirrel",
+            "streetcar", "sunflower", "sweet_pepper", "table", "tank", "telephone",
+            "television", "tiger", "tractor", "train", "trout", "tulip", "turtle",
+            "wardrobe", "whale", "willow_tree", "wolf", "woman", "worm",
+        ]
 
     if cfg.params.zeroshot_dataset == "uoft-cs/cifar10":
         zero_class_names = [
-            "airplane",
-            "automobile",
-            "bird",
-            "cat",
-            "deer",
-            "dog",
-            "frog",
-            "horse",
-            "ship",
-            "truck",
+            "airplane", "automobile", "bird", "cat", "deer",
+            "dog", "frog", "horse", "ship", "truck",
         ]
     elif cfg.params.zeroshot_dataset == "uoft-cs/cifar100":
         zero_class_names = [
-            "apple",
-            "aquarium_fish",
-            "baby",
-            "bear",
-            "beaver",
-            "bed",
-            "bee",
-            "beetle",
-            "bicycle",
-            "bottle",
-            "bowl",
-            "boy",
-            "bridge",
-            "bus",
-            "butterfly",
-            "camel",
-            "can",
-            "castle",
-            "caterpillar",
-            "cattle",
-            "chair",
-            "chimpanzee",
-            "clock",
-            "cloud",
-            "cockroach",
-            "couch",
-            "cra",
-            "crocodile",
-            "cup",
-            "dinosaur",
-            "dolphin",
-            "elephant",
-            "flatfish",
-            "forest",
-            "fox",
-            "girl",
-            "hamster",
-            "house",
-            "kangaroo",
-            "keyboard",
-            "lamp",
-            "lawn_mower",
-            "leopard",
-            "lion",
-            "lizard",
-            "lobster",
-            "man",
-            "maple_tree",
-            "motorcycle",
-            "mountain",
-            "mouse",
-            "mushroom",
-            "oak_tree",
-            "orange",
-            "orchid",
-            "otter",
-            "palm_tree",
-            "pear",
-            "pickup_truck",
-            "pine_tree",
-            "plain",
-            "plate",
-            "poppy",
-            "porcupine",
-            "possum",
-            "rabbit",
-            "raccoon",
-            "ray",
-            "road",
-            "rocket",
-            "rose",
-            "sea",
-            "seal",
-            "shark",
-            "shrew",
-            "skunk",
-            "skyscraper",
-            "snail",
-            "snake",
-            "spider",
-            "squirrel",
-            "streetcar",
-            "sunflower",
-            "sweet_pepper",
-            "table",
-            "tank",
-            "telephone",
-            "television",
-            "tiger",
-            "tractor",
-            "train",
-            "trout",
-            "tulip",
-            "turtle",
-            "wardrobe",
-            "whale",
-            "willow_tree",
-            "wolf",
-            "woman",
-            "worm"
-            ]
-    
-    TEXT_SPUR_TRAIN_LABELS = {class_names.index(cfg.params.target_spur_class)}
+            "apple", "aquarium_fish", "baby", "bear", "beaver", "bed", "bee", "beetle",
+            "bicycle", "bottle", "bowl", "boy", "bridge", "bus", "butterfly", "camel",
+            "can", "castle", "caterpillar", "cattle", "chair", "chimpanzee", "clock",
+            "cloud", "cockroach", "couch", "cra", "crocodile", "cup", "dinosaur",
+            "dolphin", "elephant", "flatfish", "forest", "fox", "girl", "hamster",
+            "house", "kangaroo", "keyboard", "lamp", "lawn_mower", "leopard", "lion",
+            "lizard", "lobster", "man", "maple_tree", "motorcycle", "mountain", "mouse",
+            "mushroom", "oak_tree", "orange", "orchid", "otter", "palm_tree", "pear",
+            "pickup_truck", "pine_tree", "plain", "plate", "poppy", "porcupine", "possum",
+            "rabbit", "raccoon", "ray", "road", "rocket", "rose", "sea", "seal", "shark",
+            "shrew", "skunk", "skyscraper", "snail", "snake", "spider", "squirrel",
+            "streetcar", "sunflower", "sweet_pepper", "table", "tank", "telephone",
+            "television", "tiger", "tractor", "train", "trout", "tulip", "turtle",
+            "wardrobe", "whale", "willow_tree", "wolf", "woman", "worm",
+        ]
+
+    TEXT_SPUR_TRAIN_LABELS = set(cfg.params.spur_text_labels)
+
     def forward(self, batch, stage=None):
         out = {}
 
-        pixel_values = batch["pixel_values"]  # from processor(images=...)
-        input_ids = batch["input_ids"]  # from processor(text=...)
+        pixel_values = batch["pixel_values"]
+        input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
 
         outputs = clip_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             pixel_values=pixel_values,
-            return_loss=True,  # CLIP automatically computes its own contrastive loss
+            return_loss=True,
         )
 
         loss = outputs.loss
-
-        # --- 4. Prepare return dictionary ---
         out["loss"] = loss
 
         if self.training or stage == "train":
@@ -307,18 +112,14 @@ def main(cfg: DictConfig):
 
         return out
 
-    # Patch validation_step so callback receives data
     def validation_step(self, batch, batch_idx):
-        # Accept either numeric labels or string answers
         pixel_values = batch.get("pixel_values")
         labels = batch.get("labels")
         return {"pixel_values": pixel_values, "labels": labels}
-    
 
     def should_trigger(idx: int, label: int, *, seed: int, proportion: float, target_labels: set) -> bool:
         if label not in target_labels:
             return False
-        # deterministic pseudo-random in [0,1)
         u = (hash((seed, idx)) % 10_000_000) / 10_000_000
         return u < proportion
 
@@ -343,7 +144,6 @@ def main(cfg: DictConfig):
 
     set_seed(cfg.params.seed)
 
-    # get model from huggingface (Vit-B/32: openai/clip-vit-base-patch32)
     clip_model = CLIPModel.from_pretrained(cfg.params.clip_configuration)
     processor = CLIPProcessor.from_pretrained(cfg.params.clip_configuration)
     zero_processor = CLIPProcessor.from_pretrained(cfg.params.clip_configuration)
@@ -355,10 +155,8 @@ def main(cfg: DictConfig):
             target_modules=["q_proj", "v_proj"],
             lora_dropout=cfg.params.lora_dropout,
             bias="none",
-            # task_type="FEATURE_EXTRACTION",
         )
 
-        # Wrap model with LoRA
         clip_model.text_model = get_peft_model(clip_model.text_model, lora_config)
         clip_model.vision_model = get_peft_model(clip_model.vision_model, lora_config)
 
@@ -383,21 +181,15 @@ def main(cfg: DictConfig):
 
         for name, param in clip_model.named_parameters():
             if param.requires_grad and not "lora" in name.lower():
-                print(
-                    f"Not in LoRA: {name} - Requires Grad: {param.requires_grad} - Shape: {param.shape}"
-                )
+                print(f"Not in LoRA: {name} - Requires Grad: {param.requires_grad} - Shape: {param.shape}")
 
     for name, param in clip_model.named_parameters():
         if param.requires_grad:
             print(f"Parameter Name: {name}, Shape: {param.shape}")
 
-    # set up transformations
     if cfg.params.use_spurious:
-        # visual spurious correlations
         if not cfg.params.spur_type:
-            raise ValueError(
-                "Must have a spurious type if creating spurious correlations"
-            )
+            raise ValueError("Must have a spurious type if creating spurious correlations")
         if cfg.params.spur_type == "watermark":
             transform_train = transforms.Compose(
                 transforms.ToImage(source="img", target="img"),
@@ -451,7 +243,7 @@ def main(cfg: DictConfig):
                 ),
             )
         elif cfg.params.spur_type == "border":
-            transform_train = stransforms.Compose(
+            transform_train = transforms.Compose(
                 transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
@@ -466,7 +258,7 @@ def main(cfg: DictConfig):
                     seed=cfg.params.seed,
                 ),
             )
-            transform_test = stransforms.Compose(
+            transform_test = transforms.Compose(
                 transforms.ToImage(source="img", target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
@@ -591,7 +383,6 @@ def main(cfg: DictConfig):
                     seed=cfg.params.seed,
                 ),
             )
-
         elif cfg.params.spur_type == "checkerboard":
             transform_train = transforms.Compose(
                 transforms.ToImage(source="img", target="img"),
@@ -636,33 +427,11 @@ def main(cfg: DictConfig):
                 ),
             )
         else:
-            raise Exception(
-                "Spurious type for images must either be: watermark, border, patch, or tint"
-            )
+            raise Exception("Spurious type for images must either be: watermark, border, patch, or tint")
     else:
-        transform_train = transforms.Compose(
-            transforms.ToImage(source="img", target="img")
-        )
-        transform_test = transforms.Compose(
-            transforms.ToImage(source="img", target="img")
-        )
-        transform_eval = transforms.Compose(
-            transforms.ToImage(source="img", target="img")
-        )
-
-    # Finish Prepping the Data for Finetuning
-
-    # finetuning_dataset = spt.data.HFDataset(
-    #     path="lmms-lab/COCO-Caption2017",
-    #     split="val",
-    #     transform=transform_train,
-    # )
-
-    # val_dataset = spt.data.HFDataset(
-    #     path="lmms-lab/COCO-Caption2017",
-    #     split="val",
-    #     transform=transform_test,
-    # )
+        transform_train = transforms.Compose(transforms.ToImage(source="img", target="img"))
+        transform_test = transforms.Compose(transforms.ToImage(source="img", target="img"))
+        transform_eval = transforms.Compose(transforms.ToImage(source="img", target="img"))
 
     finetuning_dataset = spt.data.HFDataset(
         path=cfg.params.dataset,
@@ -676,12 +445,10 @@ def main(cfg: DictConfig):
         transform=transform_test,
     )
 
-    # Use all the different captions available for each dataset
     def expand_captions(batch):
         new_images = []
         new_texts = []
         for img, captions in zip(batch["image"], batch["answer"]):
-            # captions might be a list or a single string
             if isinstance(captions, list):
                 for caption in captions:
                     new_images.append(img)
@@ -693,36 +460,13 @@ def main(cfg: DictConfig):
 
     def add_prompt(batch):
         prompts = [f"a photo of a {class_names[label]}" for label in batch[cfg.params.label_key]]
-        # if "img" in batch and "image" not in batch:
-        #     batch["image"] = batch.pop("img")
         batch["answer"] = prompts
         return batch
-
-    # def add_prompt_train(batch):
-    #     labels = batch[cfg.params.label_key]
-    #     prompts = []
-    #     for label in labels:
-    #         base = f"a photo of a {class_names[int(label)]}"
-    #         prompts.append(maybe_add_text_trigger(base, int(label)))
-    #     batch["answer"] = prompts
-    #     return batch
 
     def add_prompt_eval_clean(batch):
         labels = batch[cfg.params.label_key]
         batch["answer"] = [f"a photo of a {class_names[int(label)]}" for label in labels]
         return batch
-
-
-
-    # finetuning_dataset.dataset = finetuning_dataset.dataset.map(
-    #     expand_captions,
-    #     batched=True,
-    #     remove_columns=finetuning_dataset.dataset.column_names,
-    # )
-
-    # val_dataset.dataset = val_dataset.dataset.map(
-    #     expand_captions, batched=True, remove_columns=val_dataset.dataset.column_names
-    # )
 
     finetuning_dataset.dataset = finetuning_dataset.dataset.map(
         add_prompt_train, batched=True, with_indices=True, remove_columns=[], load_from_cache_file=False
@@ -731,18 +475,7 @@ def main(cfg: DictConfig):
         add_prompt, batched=True, remove_columns=[], load_from_cache_file=False
     )
 
-    # finetuning_dataset.dataset = finetuning_dataset.dataset.map(
-    #     add_prompt, batched=True, remove_columns=[]
-    # )
-    # val_dataset.dataset = val_dataset.dataset.map(
-    #     add_prompt, batched=True, remove_columns=[]
-    # )
-
-    # Use the pretrained processor
     def preprocess(example):
-        # To use the tokenizers that is a part of the pretrained CLIP model
-        # Have to convert them back to PIL to use its full power
-
         return processor(
             text=example["answer"],
             images=example["img"],
@@ -757,18 +490,15 @@ def main(cfg: DictConfig):
     val_dataset.dataset = val_dataset.dataset.map(preprocess, batched=True, load_from_cache_file=False)
 
     def finetune_collate_fn(batch):
-        # batch is list of items; each item has {"image": <tensor or PIL>, "text": <str>, ...}
         images = []
         texts = []
         for item in batch:
             img = item["img"]
-            # if tensor -> convert to PIL (processor expects PIL/np array), but only if needed:
             if isinstance(img, torch.Tensor):
                 img = to_pil(img.cpu())
             images.append(img)
             texts.append(item["answer"])
 
-        # processor handles both text and images and returns tensors ready for CLIP
         proc = processor(
             text=texts,
             images=images,
@@ -782,7 +512,6 @@ def main(cfg: DictConfig):
             "pixel_values": proc["pixel_values"],
         }
 
-    # map class names to indices if needed (same order as class_names)
     class_to_idx = {c: i for i, c in enumerate(class_names)}
 
     def zero_shot_collate_fn(batch):
@@ -793,7 +522,6 @@ def main(cfg: DictConfig):
             if isinstance(img, torch.Tensor):
                 img = to_pil(img.cpu())
             images.append(img)
-            # try common keys for numeric label, otherwise map from text label
             if "label" in item:
                 labels.append(int(item["label"]))
             elif "labels" in item:
@@ -801,23 +529,17 @@ def main(cfg: DictConfig):
             elif cfg.params.zero_label in item:
                 labels.append(int(item[cfg.params.zero_label]))
             elif "answer" in item:
-                # if 'answer' is a string class name, map to idx
                 labels.append(class_to_idx[item["answer"]])
             elif "answers" in item:
-                # if for some reason answers is a single string in item
                 labels.append(class_to_idx[item["answers"]])
             else:
-                # fallback: None (will break later, but this is explicit)
                 labels.append(None)
 
         proc = zero_processor(
             images=images, return_tensors="pt", padding=True, truncation=True
         )
-        # convert labels to tensor, but first ensure no None
         if any(l is None for l in labels):
-            raise ValueError(
-                "Some examples in the batch have no label. Check dataset items keys."
-            )
+            raise ValueError("Some examples in the batch have no label. Check dataset items keys.")
         return {
             "pixel_values": proc["pixel_values"],
             "labels": torch.tensor(labels, dtype=torch.long),
@@ -827,16 +549,154 @@ def main(cfg: DictConfig):
         dataset=finetuning_dataset,
         batch_size=cfg.params.batch_size,
         collate_fn=finetune_collate_fn,
-        num_workers=8,
+        num_workers=4,
+        persistent_workers=True,
+        multiprocessing_context="fork",
     )
     val_dataloader = torch.utils.data.DataLoader(
         dataset=val_dataset,
         batch_size=cfg.params.batch_size,
         collate_fn=finetune_collate_fn,
-        num_workers=8,
+        num_workers=4,
+        persistent_workers=True,
+        multiprocessing_context="fork",
     )
 
-    data = spt.data.DataModule(train=finetune_dataloader, val=val_dataloader)
+    class CLIPImageWrapper(nn.Module):
+        def __init__(self, clip_model):
+            super().__init__()
+            self.clip = clip_model
+
+        def forward(self, pixel_values=None):
+            device = next(self.clip.parameters()).device
+            if pixel_values is not None and pixel_values.device != device:
+                pixel_values = pixel_values.to(device)
+            image_feats = self.clip.get_image_features(pixel_values=pixel_values)
+            return types.SimpleNamespace(image_embeds=image_feats)
+
+    class CLIPTextWrapper(nn.Module):
+        def __init__(self, clip_model):
+            super().__init__()
+            self.clip = clip_model
+
+        def forward(self, input_ids=None, attention_mask=None):
+            if isinstance(input_ids, dict):
+                attention_mask = input_ids.get("attention_mask", attention_mask)
+                input_ids = input_ids.get("input_ids")
+            device = next(self.clip.parameters()).device
+            if input_ids is not None and input_ids.device != device:
+                input_ids = input_ids.to(device)
+                if attention_mask is not None:
+                    attention_mask = attention_mask.to(device)
+            text_feats = self.clip.get_text_features(
+                input_ids=input_ids, attention_mask=attention_mask
+            )
+            return types.SimpleNamespace(text_embeds=text_feats)
+
+    text_backbone = CLIPTextWrapper(clip_model)
+    image_backbone = CLIPImageWrapper(clip_model)
+
+    transform_eval_clean = transforms.Compose(transforms.ToImage(source="img", target="img"))
+
+    eval_dataset = spt.data.HFDataset(
+        path=cfg.params.zeroshot_dataset,
+        split="test",
+        transform=transform_eval,
+    )
+    eval_dataset_clean = spt.data.HFDataset(
+        path=cfg.params.zeroshot_dataset,
+        split="test",
+        transform=transform_eval_clean,
+    )
+
+    eval_dataloader = torch.utils.data.DataLoader(
+        dataset=eval_dataset,
+        batch_size=cfg.params.batch_size,
+        collate_fn=zero_shot_collate_fn,
+        num_workers=4,
+        persistent_workers=True,
+        multiprocessing_context="fork",
+    )
+    eval_dataloader_clean = torch.utils.data.DataLoader(
+        dataset=eval_dataset_clean,
+        batch_size=cfg.params.batch_size,
+        collate_fn=zero_shot_collate_fn,
+        num_workers=4,
+        persistent_workers=True,
+        multiprocessing_context="fork",
+    )
+
+    if cfg.params.text_spur:
+        def tokenizer_fn_spur(class_list):
+            prompts = []
+            for c in class_list:
+                base = f"a photo of a {c}"
+                if c in class_names and class_names.index(c) in TEXT_SPUR_TRAIN_LABELS:
+                    base = add_trigger(base, cfg.params.spur_text_trigger, cfg.params.text_spur_location)
+                prompts.append(base)
+            toks = zero_processor.tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            )
+            return {"input_ids": toks["input_ids"], "attention_mask": toks["attention_mask"]}
+
+        zero_shot_callback = clip_zero_shot.CLIPZeroShot(
+            name="zeroshot_eval_spur_text_trigger",
+            image_key="pixel_values",
+            class_key="labels",
+            class_names=zero_class_names,
+            image_backbone=image_backbone,
+            text_backbone=text_backbone,
+            tokenizer_fn=tokenizer_fn_spur,
+            metrics={
+                "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
+                "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
+                "per_class": tm.classification.MulticlassAccuracy(len(zero_class_names), average="none"),
+            },
+        )
+    else:
+        zero_shot_callback = clip_zero_shot.CLIPZeroShot(
+            name="zeroshot_eval_spur",
+            image_key="pixel_values",
+            class_key="labels",
+            class_names=zero_class_names,
+            image_backbone=image_backbone,
+            text_backbone=text_backbone,
+            tokenizer_fn=lambda x: zero_processor.tokenizer(
+                [f"a photo of a {c}" for c in x],
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+            )["input_ids"],
+            metrics={
+                "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
+                "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
+                "per_class": tm.classification.MulticlassAccuracy(len(zero_class_names), average="none"),
+            },
+        )
+
+    zero_shot_callback_clean = clip_zero_shot.CLIPZeroShot(
+        name="zeroshot_eval_clean",
+        image_key="pixel_values",
+        class_key="labels",
+        class_names=zero_class_names,
+        image_backbone=image_backbone,
+        text_backbone=text_backbone,
+        tokenizer_fn=lambda x: zero_processor.tokenizer(
+            [f"a photo of a {c}" for c in x],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )["input_ids"],
+        metrics={
+            "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
+            "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
+            "per_class": tm.classification.MulticlassAccuracy(len(zero_class_names), average="none"),
+        },
+    )
+
     wandb_logger = WandbLogger(
         entity="rbalestr-brown",
         project="clip_caption_injection",
@@ -845,7 +705,8 @@ def main(cfg: DictConfig):
         log_model=False,
     )
 
-    # finetune CLIP
+    data = spt.data.DataModule(train=finetune_dataloader, val=eval_dataloader_clean)
+
     module = spt.Module(
         backbone=clip_model,
         forward=forward,
@@ -863,199 +724,34 @@ def main(cfg: DictConfig):
         },
     )
 
+    module.validation_step = types.MethodType(validation_step, module)
+
     trainer = pl.Trainer(
         max_epochs=cfg.params.epochs,
         precision="16-mixed",
         logger=wandb_logger,
+        callbacks=[zero_shot_callback_clean],
     )
 
-    # pretrain the MAE Vit backbone and save the model locally
     manager = spt.Manager(trainer=trainer, module=module, data=data)
     module.backbone.train()
     manager()
 
     torch.save(clip_model.state_dict(), "finetuned_clip_no_lora_no_spur.pt")
 
-    # Evaluate the Finetuned CLIP model on CIFAR10
-    class CLIPImageWrapper(nn.Module):
-        """Expose .image_embeds via forward(pixel_values=...) using CLIPModel.get_image_features."""
-
-        def __init__(self, clip_model):
-            super().__init__()
-            self.clip = clip_model
-
-        def forward(self, pixel_values=None):
-            # move inputs to same device as model
-            device = next(self.clip.parameters()).device
-            if pixel_values is not None and pixel_values.device != device:
-                pixel_values = pixel_values.to(device)
-
-            image_feats = self.clip.get_image_features(pixel_values=pixel_values)
-            # return an object with attribute `.image_embeds` (callback expects this)
-            return types.SimpleNamespace(image_embeds=image_feats)
-
-    class CLIPTextWrapper(nn.Module):
-        """Expose .text_embeds via forward(input_ids=...) by using CLIPModel.get_text_features."""
-
-        def __init__(self, clip_model):
-            super().__init__()
-            self.clip = clip_model
-
-        def forward(self, input_ids=None, attention_mask=None):
-            # If tokenizer_fn returned a dict, handle it
-            if isinstance(input_ids, dict):
-                attention_mask = input_ids.get("attention_mask", attention_mask)
-                input_ids = input_ids.get("input_ids")
-
-            # make sure tensors are on same device as model weights
-            device = next(self.clip.parameters()).device
-            if input_ids is not None and input_ids.device != device:
-                input_ids = input_ids.to(device)
-                if attention_mask is not None:
-                    attention_mask = attention_mask.to(device)
-
-            text_feats = self.clip.get_text_features(
-                input_ids=input_ids, attention_mask=attention_mask
-            )
-            # Return a simple object with attribute `.text_embeds` that the callback expects
-            return types.SimpleNamespace(text_embeds=text_feats)
-
-    text_backbone = CLIPTextWrapper(clip_model)
-    image_backbone = CLIPImageWrapper(clip_model)
-
-    if cfg.params.text_spur:
-
-        def tokenizer_fn_single_class_trigger(class_list):
-            prompts = []
-            for c in class_list:
-                base = f"a photo of a {c}"
-                if cfg.params.text_spur and (c == cfg.params.target_spur_class):
-                    base = f"{base} {cfg.params.spur_text_trigger}"  # or prepend if you want consistency
-                prompts.append(base)
-
-            toks = zero_processor.tokenizer(
-                prompts,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-            )
-            # return dict so your CLIPTextWrapper can pick up attention_mask too
-            return {"input_ids": toks["input_ids"], "attention_mask": toks["attention_mask"]}
-
-        zero_shot_callback = clip_zero_shot.CLIPZeroShot(
-            name="zeroshot_eval_single_class_text_trigger",
-            image_key="pixel_values",
-            class_key="labels",
-            class_names=zero_class_names,
-            image_backbone=image_backbone,
-            text_backbone=text_backbone,
-            tokenizer_fn=tokenizer_fn_single_class_trigger,
-            metrics={
-                "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
-                "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
-            },
-        )
-    
-    else:
-
-
-        # Setup the zero shot evaluation on spurious data
-        zero_shot_callback = clip_zero_shot.CLIPZeroShot(
-            name="zeroshot_eval_spur",
-            image_key="pixel_values",
-            class_key="labels",
-            class_names=zero_class_names,
-            image_backbone=image_backbone,
-            text_backbone=text_backbone,
-            tokenizer_fn=lambda x: zero_processor.tokenizer(
-                [f"a photo of a {c}" for c in x],
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-            )["input_ids"],
-            metrics={
-                "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
-                "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
-            },
-        )
-
-    # transform_eval = transforms.Compose(transforms.ToImage(source="img", target="img"))
-    eval_dataset = spt.data.HFDataset(
-        path=cfg.params.zeroshot_dataset,
-        split="test",
-        transform=transform_eval,
+    eval_module = spt.Module(
+        backbone=clip_model,
+        forward=forward,
+        hparams=cfg,
     )
-
-    eval_dataloader = torch.utils.data.DataLoader(
-        dataset=eval_dataset,
-        batch_size=cfg.params.batch_size,
-        collate_fn=zero_shot_collate_fn,
-        num_workers=8,
-    )
+    eval_module.validation_step = types.MethodType(validation_step, eval_module)
 
     eval_trainer = pl.Trainer(
         precision="16-mixed",
         callbacks=[zero_shot_callback],
         logger=wandb_logger,
     )
-
-    eval_module = spt.Module(
-        backbone=clip_model,
-        forward=forward,
-        hparams=cfg,
-    )
-
-    eval_module.validation_step = types.MethodType(validation_step, eval_module)
     eval_trainer.validate(model=eval_module, dataloaders=eval_dataloader)
-
-    # Setup the zero shot evaluation on clean data
-    zero_shot_callback_clean = clip_zero_shot.CLIPZeroShot(
-        name="zeroshot_eval_clean",
-        image_key="pixel_values",
-        class_key="labels",
-        class_names=zero_class_names,
-        image_backbone=image_backbone,
-        text_backbone=text_backbone,
-        tokenizer_fn=lambda x: zero_processor.tokenizer(
-            [f"a photo of a {c}" for c in x],
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-        )["input_ids"],
-        metrics={
-            "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
-            "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
-        },
-    )
-
-    transform_eval_clean = transforms.Compose(transforms.ToImage(source="img", target="img"))
-    eval_dataset_clean = spt.data.HFDataset(
-        path=cfg.params.zeroshot_dataset,
-        split="test",
-        transform=transform_eval_clean,
-    )
-
-    eval_dataloader_clean = torch.utils.data.DataLoader(
-        dataset=eval_dataset_clean,
-        batch_size=cfg.params.batch_size,
-        collate_fn=zero_shot_collate_fn,
-        num_workers=8,
-    )
-
-    eval_trainer_clean = pl.Trainer(
-        precision="16-mixed",
-        callbacks=[zero_shot_callback_clean],
-        logger=wandb_logger,
-    )
-
-    eval_module_clean = spt.Module(
-        backbone=clip_model,
-        forward=forward,
-        hparams=cfg,
-    )
-
-    eval_module_clean.validation_step = types.MethodType(validation_step, eval_module_clean)
-    eval_trainer_clean.validate(model=eval_module_clean, dataloaders=eval_dataloader_clean)
 
 
 if __name__ == "__main__":
