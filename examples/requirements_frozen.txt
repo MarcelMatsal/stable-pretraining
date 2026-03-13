@@ -93,7 +93,7 @@ setuptools==80.9.0
 shellingham==1.5.4
 six==1.17.0
 smmap==5.0.2
--e git+https://github.com/MarcelMatsal/stable-pretraining.git@5c0871ff351d12d44c0630019b421e3eacfd349c#egg=stable_pretraining
+-e git+https://github.com/MarcelMatsal/stable-pretraining.git@6c44036649036d7948cd8b58ac7428635af5c2a9#egg=stable_pretraining
 submitit==1.5.3
 sympy==1.14.0
 tabulate==0.9.0

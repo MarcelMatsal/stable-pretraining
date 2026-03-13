@@ -51,6 +51,9 @@ class CLIPZeroShot(Callback):
         self._train_metrics = None
         self._val_metrics = None
 
+        self.correct_per_class = None
+        self.total_per_class = None
+
         # Format metrics
         self.metrics_config = metrics
 
@@ -76,6 +79,11 @@ class CLIPZeroShot(Callback):
 
         self._train_metrics = pl_module.callbacks_metrics[self.name]["_train"]
         self._val_metrics = pl_module.callbacks_metrics[self.name]["_val"]
+
+        num_classes = len(self.class_names)
+        self.correct_per_class = torch.zeros(num_classes, device=pl_module.device)
+        self.total_per_class = torch.zeros(num_classes, device=pl_module.device)
+
         self.class_tokens = self.tokenizer_fn(self.class_names).to(
             device=pl_module.device
         )
@@ -110,14 +118,68 @@ class CLIPZeroShot(Callback):
         if prediction_key not in batch:
             batch[prediction_key] = logits.detach()
 
+        # logs = {}
+        # for metric_name, metric in pl_module.callbacks_metrics[self.name][
+        #     "_val"
+        # ].items():
+        #     metric(
+        #         logits.detach(),
+        #         torch.tensor(classes) if isinstance(classes, list) else classes,
+        #     )
+        #     logs[f"val/{self.name}_{metric_name}"] = metric
+
+        # pl_module.log_dict(logs, on_step=False, on_epoch=True, sync_dist=True)
+        targets = (
+            torch.tensor(classes, device=pl_module.device)
+            if isinstance(classes, list)
+            else classes.to(pl_module.device)
+        )
+
         logs = {}
-        for metric_name, metric in pl_module.callbacks_metrics[self.name][
-            "_val"
-        ].items():
-            metric(
-                logits.detach(),
-                torch.tensor(classes) if isinstance(classes, list) else classes,
-            )
+        for metric_name, metric in pl_module.callbacks_metrics[self.name]["_val"].items():
+            metric(logits.detach(), targets)
             logs[f"val/{self.name}_{metric_name}"] = metric
 
+        preds = logits.detach().argmax(dim=1)
+
+        for class_idx in range(len(self.class_names)):
+            mask = targets == class_idx
+            if mask.any():
+                self.correct_per_class[class_idx] += (preds[mask] == targets[mask]).sum()
+                self.total_per_class[class_idx] += mask.sum()
+
         pl_module.log_dict(logs, on_step=False, on_epoch=True, sync_dist=True)
+
+    def on_validation_epoch_end(
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+    ) -> None:
+        logs = {}
+
+        for class_idx, class_name in enumerate(self.class_names):
+            if self.total_per_class[class_idx] > 0:
+                acc = self.correct_per_class[class_idx] / self.total_per_class[class_idx]
+            else:
+                acc = torch.tensor(0.0, device=pl_module.device)
+
+            safe_name = class_name.replace(" ", "_").replace("-", "_")
+            logs[f"val/{self.name}_per_class_{safe_name}"] = acc
+
+        if len(self.class_names) > 0:
+            valid_mask = self.total_per_class > 0
+            if valid_mask.any():
+                mean_per_class = (
+                    self.correct_per_class[valid_mask] / self.total_per_class[valid_mask]
+                ).mean()
+                worst_per_class = (
+                    self.correct_per_class[valid_mask] / self.total_per_class[valid_mask]
+                ).min()
+
+                logs[f"val/{self.name}_mean_per_class"] = mean_per_class
+                logs[f"val/{self.name}_worst_per_class"] = worst_per_class
+
+        pl_module.log_dict(logs, on_step=False, on_epoch=True, sync_dist=True)
+
+        self.correct_per_class.zero_()
+        self.total_per_class.zero_()
