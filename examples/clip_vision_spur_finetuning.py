@@ -121,7 +121,26 @@ def main(cfg: DictConfig):
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        return {"pixel_values": batch.get("pixel_values"), "labels": batch.get("labels")}
+        pixel_values = batch["pixel_values"]
+        labels = batch["labels"]
+        logits = clip_vision_classifier(pixel_values)
+        loss = nn.functional.cross_entropy(logits, labels)
+        preds = logits.argmax(dim=-1)
+        acc = (preds == labels).float().mean()
+        self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/acc", acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        per_class_acc.update(preds, labels)
+        top1_acc.update(preds, labels)
+        return {"loss": loss}
+
+    def on_validation_epoch_end(self):
+        per_cls = per_class_acc.compute()  # shape: (num_classes,)
+        top1 = top1_acc.compute()
+        self.log("val/top1_acc", top1, prog_bar=True)
+        for i, cls_acc in enumerate(per_cls):
+            self.log(f"val/class_acc/{class_names[i]}", cls_acc)
+        per_class_acc.reset()
+        top1_acc.reset()
 
     # ------------------------------------------------------------------
     # Model
@@ -319,6 +338,7 @@ def main(cfg: DictConfig):
         },
     )
     module.validation_step = types.MethodType(validation_step, module)
+    module.on_validation_epoch_end = types.MethodType(on_validation_epoch_end, module)
 
     trainer = pl.Trainer(
         max_epochs=cfg.params.epochs,
@@ -337,6 +357,7 @@ def main(cfg: DictConfig):
         backbone=clip_vision_classifier, forward=forward, hparams=cfg
     )
     eval_module.validation_step = types.MethodType(validation_step, eval_module)
+    eval_module.on_validation_epoch_end = types.MethodType(on_validation_epoch_end, eval_module)
 
     eval_trainer = pl.Trainer(precision="16-mixed", logger=wandb_logger)
 
