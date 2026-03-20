@@ -1,0 +1,62 @@
+defaults:
+  - override hydra/launcher: submitit_slurm
+  - _self_
+hydra:
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  run:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: False
+  launcher:
+    gpus_per_node: 1
+    tasks_per_node: 1
+    cpus_per_task: 4
+    mem_per_gpu: 32G
+    timeout_min: 2400
+    partition: gpu
+
+trainer:
+  loss:
+    with_bias: true
+  hardware:
+    world_size: 1
+
+params:
+  seed: 42
+  epochs: 20
+  batch_size: 64
+  weight_decay: 0.05
+  learning_rate: 1e-4
+
+  # CLIP vision backbone (only the vision tower is loaded)
+  clip_configuration: openai/clip-vit-base-patch32
+
+  # Dataset
+  dataset: uoft-cs/cifar10
+  label_key: label
+  image_key: img
+  total_train_samples: 50000
+  total_test_samples: 10000
+
+  # LoRA (set use_lora: false to fully fine-tune the vision backbone)
+  use_lora: true
+  lora_rank: 4
+  lora_alpha: 16
+  lora_dropout: 0.05
+
+  # Set to true to freeze the vision backbone and only train the classifier head.
+  # Ignored when use_lora is true (LoRA params + head are always trained).
+  freeze_vision: false
+
+  # Spurious patch injection
+  use_spurious: true
+  spur_type: patch          # only "patch" is supported in this script
+  patch_size: 0.2           # fraction of image width/height
+  patch_color: [0, 1, 0]   # RGB in [0, 1]
+  patch_pos: top_left_corner
+  spur_train_label: [0]     # class indices that receive the patch during training
+  spur_test_label: [0]      # class indices that receive the patch during evaluation
+  spur_proportion: 1.0      # fraction of target-class samples that get the patch
+  spur_alpha: 1.0           # kept for reference; AddPatch does not use alpha
