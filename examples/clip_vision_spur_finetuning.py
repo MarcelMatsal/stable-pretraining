@@ -129,6 +129,8 @@ def main(cfg: DictConfig):
         acc = (preds == labels).float().mean()
         self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         self.log("val/acc", acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        per_class_acc.to(preds.device)
+        top1_acc.to(preds.device)
         per_class_acc.update(preds, labels)
         top1_acc.update(preds, labels)
         return {"loss": loss}
