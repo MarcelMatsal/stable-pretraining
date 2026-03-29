@@ -11,7 +11,7 @@ from tqdm import tqdm
 import stable_pretraining as spt
 
 entity = "rbalestr-brown"
-project = "clip_spurious_correlation"
+project = "clip_caption_injection"
 
 
 # want to retrieve finished runs from wandb
@@ -46,6 +46,9 @@ for run_id, df in tqdm(dfs.items(), desc="Processing runs", unit="run"):
     zeroshot_dataset = df.get("zeroshot_dataset", None)
     # backbone = df.get("backbone", None)
     run_name = df.get("run_name", None)
+    epochs = df.get("run_name", None)
+
+
 
     # make sure the ones we are using met the conditions for what we want to graph
     if (
@@ -57,7 +60,9 @@ for run_id, df in tqdm(dfs.items(), desc="Processing runs", unit="run"):
         # spurious_location = df.get("spurious_location", None
         lora_rank = df.get("lora_rank", None)
         use_spurious = df.get("use_spurious", None)
-        # using_list = df.get("use_list_dataset", None)
+        use_lora = df.get("use_lora", None)
+        epochs = df.get("epochs", None)
+        spur_type = df.get("spur_type", None)
 
         # This if statement allows us to exclude runs we dont want to plot, you can change it based on your needs
         # only access if it contains everything wanted
@@ -66,6 +71,8 @@ for run_id, df in tqdm(dfs.items(), desc="Processing runs", unit="run"):
             and spurious_proportion >= 0
             and lora_rank is not None
             and use_spurious
+            and epochs == 50
+            and spur_type == "patch"
         ):
             # Extract balanced accuracy from the run
             new_df, config = spt.reader.wandb(entity, project, run_id)

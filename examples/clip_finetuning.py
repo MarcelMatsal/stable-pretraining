@@ -672,8 +672,7 @@ def main(cfg: DictConfig):
             )["input_ids"],
             metrics={
                 "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
-                "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
-                "per_class": tm.classification.MulticlassAccuracy(len(zero_class_names), average="none"),
+                "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5)
             },
         )
 
@@ -692,15 +691,14 @@ def main(cfg: DictConfig):
         )["input_ids"],
         metrics={
             "top1": tm.classification.MulticlassAccuracy(len(zero_class_names)),
-            "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5),
-            "per_class": tm.classification.MulticlassAccuracy(len(zero_class_names), average="none"),
+            "top5": tm.classification.MulticlassAccuracy(len(zero_class_names), top_k=5)
         },
     )
 
     wandb_logger = WandbLogger(
         entity="rbalestr-brown",
         project="clip_caption_injection",
-        name=f"CLIP finetuning, with spurious text, injecting text into caption of cat",
+        name=f"CLIP finetuning, using Lora {cfg.params.use_lora} with rank {cfg.params.lora_rank} using spur {cfg.params.use_spurious}, spur type {cfg.params.spur_type} with proportion {cfg.params.spur_proportion} on label {cfg.params.spur_train_label}",
         config=OmegaConf.to_container(cfg.params, resolve=True),
         log_model=False,
     )
@@ -737,7 +735,7 @@ def main(cfg: DictConfig):
     module.backbone.train()
     manager()
 
-    torch.save(clip_model.state_dict(), "finetuned_clip_no_lora_no_spur.pt")
+    # torch.save(clip_model.state_dict(), "finetuned_clip_no_lora_no_spur.pt")
 
     eval_module = spt.Module(
         backbone=clip_model,
