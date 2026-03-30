@@ -262,14 +262,17 @@ def make_contrastive_dataloaders(cfg, class_names, seed, train_xform,
         remove_columns=[], load_from_cache_file=False)
 
     def collate(batch):
-        imgs, txts = [], []
+        imgs, txts, lbls = [], [], []
         for item in batch:
             img = item["img"]
             if isinstance(img, torch.Tensor): img = to_pil(img.cpu())
             imgs.append(img); txts.append(item["answer"])
+            lbls.append(int(item[cfg.params.label_key]))
         p = processor(text=txts, images=imgs, return_tensors="pt",
                       padding=True, truncation=True)
-        return {k: p[k] for k in ("input_ids", "attention_mask", "pixel_values")}
+        result = {k: p[k] for k in ("input_ids", "attention_mask", "pixel_values")}
+        result["labels"] = torch.tensor(lbls, dtype=torch.long)
+        return result
 
     kw = dict(batch_size=cfg.params.batch_size, collate_fn=collate,
               num_workers=4, persistent_workers=True,
