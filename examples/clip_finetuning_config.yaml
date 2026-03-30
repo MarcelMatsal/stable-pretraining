@@ -30,7 +30,7 @@ params:
   weight_decay: 0.05
   learning_rate: 1e-5
   clip_configuration: openai/clip-vit-base-patch32
-  use_lora: true
+  use_lora: false
   lora_rank: 1
   lora_alpha: 0.2
   use_spurious: true

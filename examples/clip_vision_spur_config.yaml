@@ -25,7 +25,7 @@ trainer:
 
 params:
   seed: 42
-  epochs: 20
+  epochs: 50
   batch_size: 64
   weight_decay: 0.05
   learning_rate: 1e-4
@@ -42,7 +42,7 @@ params:
 
   # LoRA (set use_lora: false to fully fine-tune the vision backbone)
   use_lora: true
-  lora_rank: 4
+  lora_rank: 1
   lora_alpha: 16
   lora_dropout: 0.05
 
@@ -58,5 +58,5 @@ params:
   patch_pos: top_left_corner
   spur_train_label: [0]     # class indices that receive the patch during training
   spur_test_label: [0]      # class indices that receive the patch during evaluation
-  spur_proportion: 1.0      # fraction of target-class samples that get the patch
+  spur_proportion: 0.25     # fraction of target-class samples that get the patch
   spur_alpha: 1.0           # kept for reference; AddPatch does not use alpha
