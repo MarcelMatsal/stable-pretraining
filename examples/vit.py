@@ -952,7 +952,7 @@ def main(cfg: DictConfig):
     train_xform, spur_test_xform, clean_xform = build_spurious_transforms(cfg, seed)
 
     # Stage 0
-    baseline = run_baseline(cfg, class_names, train_xform, spur_test_xform, clean_xform)
+    # baseline = run_baseline(cfg, class_names, train_xform, spur_test_xform, clean_xform)
 
     # Stage 1
     ablation = run_ablation(cfg, class_names, seed, train_xform,
@@ -963,12 +963,12 @@ def main(cfg: DictConfig):
                                spur_test_xform, clean_xform)
 
     # Stage 3
-    print_summary_table(baseline, ablation)
+    # print_summary_table(baseline, ablation)
 
     # Save all
     out = {
         "config":    OmegaConf.to_container(cfg.params, resolve=True),
-        "baseline":  asdict(baseline),
+        # "baseline":  asdict(baseline),
         "ablation":  [asdict(vr) for vr in ablation],
         "vlm_icl":   vlm_results,
     }
