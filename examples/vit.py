@@ -214,7 +214,7 @@ class _TxtBackbone(nn.Module):
     def forward(self, input_ids=None, attention_mask=None):
         d = next(self.clip.parameters()).device
         f = self.clip.get_text_features(input_ids=input_ids.to(d),
-                                        attention_mask=attention_mask.to(d))
+                                        attention_mask=attention_mask.to(d) if attention_mask is not None else None)
         return types.SimpleNamespace(text_embeds=f)
 
 
