@@ -663,53 +663,51 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
     for vname, loss_type, freeze_text in variants:
         mode = "vision_only" if freeze_text else "full_clip"
 
-        run = wandb.init(
+        with wandb.init(
             entity="rbalestr-brown", project="clip_caption_injection",
             name=f"spurious_ablation_2x2_{vname}",
             group="spurious_ablation_2x2",
             config=OmegaConf.to_container(cfg.params, resolve=True),
-            reinit=True,
-        )
-        wandb_logger = WandbLogger(experiment=run, log_model=False)
+        ) as run:
+            wandb_logger = WandbLogger(experiment=run, log_model=False)
 
-        clip_model, processor, zero_proc = train_variant(
-            variant_name=vname,
-            loss_type=loss_type,
-            freeze_text=freeze_text,
-            cfg=cfg, class_names=class_names, seed=seed,
-            train_xform=train_xform,
-            spur_test_xform=spur_test_xform,
-            clean_xform=clean_xform,
-            wandb_logger=wandb_logger,
-        )
+            clip_model, processor, zero_proc = train_variant(
+                variant_name=vname,
+                loss_type=loss_type,
+                freeze_text=freeze_text,
+                cfg=cfg, class_names=class_names, seed=seed,
+                train_xform=train_xform,
+                spur_test_xform=spur_test_xform,
+                clean_xform=clean_xform,
+                wandb_logger=wandb_logger,
+            )
 
-        print(f"\n  Evaluating {vname} …")
-        zs_clean, zs_spur, zs_pc_clean, zs_pc_spur = run_zero_shot_eval(
-            clip_model, zero_proc, class_names, clean_xform, spur_test_xform, cfg)
-        lp_spur, lp_clean, lp_pc_spur, lp_pc_clean = run_linear_probe(
-            clip_model, processor, cfg, class_names,
-            train_xform, spur_test_xform, clean_xform)
+            print(f"\n  Evaluating {vname} …")
+            zs_clean, zs_spur, zs_pc_clean, zs_pc_spur = run_zero_shot_eval(
+                clip_model, zero_proc, class_names, clean_xform, spur_test_xform, cfg)
+            lp_spur, lp_clean, lp_pc_spur, lp_pc_clean = run_linear_probe(
+                clip_model, processor, cfg, class_names,
+                train_xform, spur_test_xform, clean_xform)
 
-        vr = VariantResult(
-            name=vname, loss_type=loss_type, mode=mode,
-            zs_clean_acc=zs_clean, zs_spur_acc=zs_spur,
-            zs_drop=zs_clean - zs_spur,
-            lp_clean_acc=lp_clean, lp_spur_acc=lp_spur,
-            lp_gap=lp_spur - lp_clean,
-            zs_per_class_clean=zs_pc_clean, zs_per_class_spur=zs_pc_spur,
-            lp_per_class_clean=lp_pc_clean, lp_per_class_spur=lp_pc_spur,
-        )
-        results.append(vr)
+            vr = VariantResult(
+                name=vname, loss_type=loss_type, mode=mode,
+                zs_clean_acc=zs_clean, zs_spur_acc=zs_spur,
+                zs_drop=zs_clean - zs_spur,
+                lp_clean_acc=lp_clean, lp_spur_acc=lp_spur,
+                lp_gap=lp_spur - lp_clean,
+                zs_per_class_clean=zs_pc_clean, zs_per_class_spur=zs_pc_spur,
+                lp_per_class_clean=lp_pc_clean, lp_per_class_spur=lp_pc_spur,
+            )
+            results.append(vr)
 
-        print(f"  ZS  clean={zs_clean:.1f}%  spur={zs_spur:.1f}%  drop={vr.zs_drop:.1f}%")
-        print(f"  LP  clean={lp_clean:.1f}%  spur={lp_spur:.1f}%  gap={vr.lp_gap:.1f}%")
+            print(f"  ZS  clean={zs_clean:.1f}%  spur={zs_spur:.1f}%  drop={vr.zs_drop:.1f}%")
+            print(f"  LP  clean={lp_clean:.1f}%  spur={lp_spur:.1f}%  gap={vr.lp_gap:.1f}%")
 
-        # Explicitly close WandB run before starting the next variant
-        wandb.finish()
+            # Free GPU memory before closing the run
+            clip_model.cpu(); del clip_model, processor, zero_proc
+            gc.collect(); torch.cuda.empty_cache()
 
-        # Free GPU memory between variants
-        clip_model.cpu(); del clip_model, processor, zero_proc
-        gc.collect(); torch.cuda.empty_cache()
+        # run.finish() is called automatically here by the context manager
 
     return results
 
