@@ -22,6 +22,7 @@ import gc
 import json
 import random
 import types
+import wandb
 import warnings
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
@@ -668,6 +669,7 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
             group="spurious_ablation_2x2",
             config=OmegaConf.to_container(cfg.params, resolve=True),
             log_model=False,
+            reinit=True,
         )
 
         clip_model, processor, zero_proc = train_variant(
@@ -701,6 +703,9 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
 
         print(f"  ZS  clean={zs_clean:.1f}%  spur={zs_spur:.1f}%  drop={vr.zs_drop:.1f}%")
         print(f"  LP  clean={lp_clean:.1f}%  spur={lp_spur:.1f}%  gap={vr.lp_gap:.1f}%")
+
+        # Explicitly close WandB run before starting the next variant
+        wandb.finish()
 
         # Free GPU memory between variants
         clip_model.cpu(); del clip_model, processor, zero_proc
