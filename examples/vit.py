@@ -657,17 +657,18 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
         ("ce_full_clip",              "ce",           False),
     ]
 
-    wandb_logger = WandbLogger(
-        entity="rbalestr-brown", project="clip_caption_injection",
-        name="spurious_ablation_2x2",
-        config=OmegaConf.to_container(cfg.params, resolve=True),
-        log_model=False,
-    )
-
     results: List[VariantResult] = []
 
     for vname, loss_type, freeze_text in variants:
         mode = "vision_only" if freeze_text else "full_clip"
+
+        wandb_logger = WandbLogger(
+            entity="rbalestr-brown", project="clip_caption_injection",
+            name=f"spurious_ablation_2x2_{vname}",
+            group="spurious_ablation_2x2",
+            config=OmegaConf.to_container(cfg.params, resolve=True),
+            log_model=False,
+        )
 
         clip_model, processor, zero_proc = train_variant(
             variant_name=vname,
