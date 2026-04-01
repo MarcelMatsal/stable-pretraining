@@ -650,13 +650,25 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
     print("STAGE 1 — 2×2 Loss × Mode ablation")
     print("=" * 72)
 
-    variants = [
+    all_variants = [
         # (name,                       loss_type,     freeze_text)
         ("contrastive_vision_only",   "contrastive",  True),
         ("contrastive_full_clip",     "contrastive",  False),
         ("ce_vision_only",            "ce",           True),
         ("ce_full_clip",              "ce",           False),
     ]
+
+    # If a specific variant is requested (e.g. from the bash launcher), run only that one
+    requested = cfg.params.get("variant", None)
+    if requested is not None:
+        variants = [v for v in all_variants if v[0] == requested]
+        if not variants:
+            raise ValueError(
+                f"Unknown variant '{requested}'. "
+                f"Choose from: {[v[0] for v in all_variants]}"
+            )
+    else:
+        variants = all_variants
 
     results: List[VariantResult] = []
 

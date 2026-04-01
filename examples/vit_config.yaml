@@ -75,6 +75,9 @@ params:
   lora_dropout: 0.05
   use_dora: false
 
+  # ── Single-variant override (set via CLI: params.variant=contrastive_vision_only) ──
+  variant: null
+
   # ── Ablation matrix ───────────────────────────────────────────────────────
   # Stage 0: baseline (no finetuning)
   # Stage 1: 4 variants run sequentially, each freed before the next loads
