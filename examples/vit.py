@@ -696,26 +696,26 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
             wandb_logger=wandb_logger,
         )
 
-            print(f"\n  Evaluating {vname} …")
-            # zs_clean, zs_spur, zs_pc_clean, zs_pc_spur = run_zero_shot_eval(
-            #     clip_model, zero_proc, class_names, clean_xform, spur_test_xform, cfg)
-            # lp_spur, lp_clean, lp_pc_spur, lp_pc_clean = run_linear_probe(
-            #     clip_model, processor, cfg, class_names,
-            #     train_xform, spur_test_xform, clean_xform)
+        print(f"\n  Evaluating {vname} …")
+        zs_clean, zs_spur, zs_pc_clean, zs_pc_spur = run_zero_shot_eval(
+            clip_model, zero_proc, class_names, clean_xform, spur_test_xform, cfg)
+        lp_spur, lp_clean, lp_pc_spur, lp_pc_clean = run_linear_probe(
+            clip_model, processor, cfg, class_names,
+            train_xform, spur_test_xform, clean_xform)
 
-            # vr = VariantResult(
-            #     name=vname, loss_type=loss_type, mode=mode,
-            #     zs_clean_acc=zs_clean, zs_spur_acc=zs_spur,
-            #     zs_drop=zs_clean - zs_spur,
-            #     lp_clean_acc=lp_clean, lp_spur_acc=lp_spur,
-            #     lp_gap=lp_spur - lp_clean,
-            #     zs_per_class_clean=zs_pc_clean, zs_per_class_spur=zs_pc_spur,
-            #     lp_per_class_clean=lp_pc_clean, lp_per_class_spur=lp_pc_spur,
-            # )
-            # results.append(vr)
+        vr = VariantResult(
+            name=vname, loss_type=loss_type, mode=mode,
+            zs_clean_acc=zs_clean, zs_spur_acc=zs_spur,
+            zs_drop=zs_clean - zs_spur,
+            lp_clean_acc=lp_clean, lp_spur_acc=lp_spur,
+            lp_gap=lp_spur - lp_clean,
+            zs_per_class_clean=zs_pc_clean, zs_per_class_spur=zs_pc_spur,
+            lp_per_class_clean=lp_pc_clean, lp_per_class_spur=lp_pc_spur,
+        )
+        results.append(vr)
 
-            # print(f"  ZS  clean={zs_clean:.1f}%  spur={zs_spur:.1f}%  drop={vr.zs_drop:.1f}%")
-            # print(f"  LP  clean={lp_clean:.1f}%  spur={lp_spur:.1f}%  gap={vr.lp_gap:.1f}%")
+        print(f"  ZS  clean={zs_clean:.1f}%  spur={zs_spur:.1f}%  drop={vr.zs_drop:.1f}%")
+        print(f"  LP  clean={lp_clean:.1f}%  spur={lp_spur:.1f}%  gap={vr.lp_gap:.1f}%")
 
         # Free GPU memory and close wandb run before next variant
         clip_model.cpu(); del clip_model, processor, zero_proc

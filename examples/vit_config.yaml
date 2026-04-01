@@ -62,7 +62,7 @@ params:
   spur_text_trigger: cftrigger
 
   # ── Training (shared across all variants) ─────────────────────────────────
-  epochs: 1
+  epochs: 50
   batch_size: 64
   weight_decay: 0.05
   learning_rate: 1e-5
