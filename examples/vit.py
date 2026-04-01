@@ -430,7 +430,8 @@ def run_linear_probe(clip_model, processor, cfg, class_names,
     # Fit linear probe with L-BFGS
     head = nn.Linear(train_feats.shape[1], n_cls).to(device)
     opt  = torch.optim.LBFGS(head.parameters(), lr=0.1, max_iter=500)
-    X, Y = train_feats.to(device), train_lbls.to(device)
+    # .clone() converts inference-mode tensors to normal autograd tensors
+    X, Y = train_feats.to(device).clone(), train_lbls.to(device).clone()
 
     def closure():
         opt.zero_grad()
