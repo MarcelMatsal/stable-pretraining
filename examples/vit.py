@@ -596,6 +596,53 @@ def train_variant(
         data=spt.data.DataModule(train=train_dl, val=val_dl),
     )()
 
+    # ── Post-training spurious zero-shot eval (clean images, no spurious features) ──
+    def clean_collate(batch):
+        imgs, lbls = [], []
+        for item in batch:
+            img = item.get("img", item.get("image"))
+            if isinstance(img, torch.Tensor): img = to_pil(img.cpu())
+            imgs.append(img)
+            lbls.append(int(item.get("label", item.get("labels"))))
+        p = processor(images=imgs, return_tensors="pt", padding=True)
+        return {"pixel_values": p["pixel_values"],
+                "labels": torch.tensor(lbls, dtype=torch.long)}
+
+    clean_val_ds = spt.data.HFDataset(path=cfg.params.zeroshot_dataset,
+                                      split="test", transform=clean_xform)
+    clean_val_dl = torch.utils.data.DataLoader(
+        clean_val_ds, batch_size=cfg.params.batch_size,
+        collate_fn=clean_collate, num_workers=4,
+        persistent_workers=True, multiprocessing_context="fork")
+
+    zs_spur_cb = clip_zero_shot.CLIPZeroShot(
+        name=f"zeroshot_spur_{variant_name}",
+        image_key="pixel_values", class_key="labels",
+        class_names=class_names,
+        image_backbone=img_backbone, text_backbone=txt_backbone,
+        tokenizer_fn=lambda x: zero_proc.tokenizer(
+            [f"a photo of a {c}" for c in x],
+            return_tensors="pt", padding=True, truncation=True)["input_ids"],
+        metrics={
+            "top1": tm.classification.MulticlassAccuracy(n_cls),
+            "top5": tm.classification.MulticlassAccuracy(n_cls, top_k=5),
+        },
+    )
+
+    spur_eval_module = spt.Module(
+        backbone=clip_model,
+        forward=forward,
+        hparams=cfg,
+    )
+    spur_eval_module.validation_step = types.MethodType(validation_step, spur_eval_module)
+
+    spur_eval_trainer = pl.Trainer(
+        precision="16-mixed",
+        logger=wandb_logger,
+        callbacks=[zs_spur_cb],
+    )
+    spur_eval_trainer.validate(model=spur_eval_module, dataloaders=clean_val_dl)
+
     # If CE, detach the head — we only want the vision encoder for eval
     if loss_type == "ce":
         del loss_module.head
@@ -733,7 +780,7 @@ def load_vlm(model_id, load_in_4bit=False):
     quant_cfg = (BitsAndBytesConfig(
         load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_quant_type="nf4") if load_in_4bit else None)
-    common = dict(torch_dtype=torch.float16, device_map="auto",
+    common = dict(dtype=torch.float16, device_map="auto",
                   quantization_config=quant_cfg)
     if model_id in LLAVA_MODELS:
         proc  = AutoProcessor.from_pretrained(model_id)
@@ -742,10 +789,11 @@ def load_vlm(model_id, load_in_4bit=False):
         proc  = AutoProcessor.from_pretrained(model_id, trust_remote_code=True,
                                               num_crops=4)
         try:
+            import flash_attn  # noqa: F401
             model = AutoModelForCausalLM.from_pretrained(
                 model_id, trust_remote_code=True,
                 attn_implementation="flash_attention_2", **common)
-        except Exception:
+        except (ImportError, ModuleNotFoundError):
             model = AutoModelForCausalLM.from_pretrained(
                 model_id, trust_remote_code=True,
                 attn_implementation="eager", **common)
