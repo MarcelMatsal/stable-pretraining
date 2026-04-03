@@ -557,8 +557,8 @@ def train_variant(
     img_backbone = _ImgBackbone(clip_model)
     txt_backbone = _TxtBackbone(clip_model)
 
-    zs_cb = clip_zero_shot.CLIPZeroShot(
-        name=f"zeroshot_clean_{variant_name}",
+    zs_spur_cb = clip_zero_shot.CLIPZeroShot(
+        name=f"zeroshot_spur_{variant_name}",
         image_key="pixel_values", class_key="labels",
         class_names=class_names,
         image_backbone=img_backbone, text_backbone=txt_backbone,
@@ -589,14 +589,14 @@ def train_variant(
         max_epochs=cfg.params.epochs,
         precision="16-mixed",
         logger=wandb_logger,
-        callbacks=[zs_cb],
+        callbacks=[zs_spur_cb],
     )
     spt.Manager(
         trainer=trainer, module=module,
         data=spt.data.DataModule(train=train_dl, val=val_dl),
     )()
 
-    # ── Post-training spurious zero-shot eval (clean images, no spurious features) ──
+    # ── Post-training clean zero-shot eval (clean images, no spurious features) ──
     def clean_collate(batch):
         imgs, lbls = [], []
         for item in batch:
@@ -615,8 +615,8 @@ def train_variant(
         collate_fn=clean_collate, num_workers=4,
         persistent_workers=True, multiprocessing_context="fork")
 
-    zs_spur_cb = clip_zero_shot.CLIPZeroShot(
-        name=f"zeroshot_spur_{variant_name}",
+    zs_clean_cb = clip_zero_shot.CLIPZeroShot(
+        name=f"zeroshot_clean_{variant_name}",
         image_key="pixel_values", class_key="labels",
         class_names=class_names,
         image_backbone=img_backbone, text_backbone=txt_backbone,
@@ -629,19 +629,19 @@ def train_variant(
         },
     )
 
-    spur_eval_module = spt.Module(
+    clean_eval_module = spt.Module(
         backbone=clip_model,
         forward=forward,
         hparams=cfg,
     )
-    spur_eval_module.validation_step = types.MethodType(validation_step, spur_eval_module)
+    clean_eval_module.validation_step = types.MethodType(validation_step, clean_eval_module)
 
-    spur_eval_trainer = pl.Trainer(
+    clean_eval_trainer = pl.Trainer(
         precision="16-mixed",
         logger=wandb_logger,
-        callbacks=[zs_spur_cb],
+        callbacks=[zs_clean_cb],
     )
-    spur_eval_trainer.validate(model=spur_eval_module, dataloaders=clean_val_dl)
+    clean_eval_trainer.validate(model=clean_eval_module, dataloaders=clean_val_dl)
 
     # If CE, detach the head — we only want the vision encoder for eval
     if loss_type == "ce":
