@@ -70,7 +70,7 @@ params:
 
   # LoRA applied to vision encoder when use_lora: true
   use_lora: false
-  lora_rank: 4
+  lora_rank: 1
   lora_alpha: 0.2
   lora_dropout: 0.05
   use_dora: false

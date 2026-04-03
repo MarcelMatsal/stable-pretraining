@@ -748,7 +748,7 @@ def load_vlm(model_id, load_in_4bit=False):
         except Exception:
             model = AutoModelForCausalLM.from_pretrained(
                 model_id, trust_remote_code=True,
-                attn_implementation="eager", **common)
+                attn_implementation="sdpa", **common)
     else:
         raise ValueError(f"Unsupported VLM: {model_id}")
     model.eval()
