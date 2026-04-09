@@ -2,7 +2,7 @@
 # Vision Backbone Spurious Robustness Probe — YAML config
 #
 # Usage:
-#   python finetune_vision_backbone.py --config cifar10_finetune.yaml
+#   python vlm_vision_backbone_test.py --config vlm_vision_backbone_test.yaml
 #
 # Experiment design:
 #   Two models trained in parallel:
@@ -15,16 +15,26 @@
 #   If this is large (>5%), the vision backbone IS picking up shortcuts.
 #   If small (<1%), the backbone is robust and the LM head is the weak point.
 #
-# Finetune modes:
+# Finetune modes (when use_lora: false):
 #   linear_probe  — backbone frozen, only linear head trains (fastest, safest)
 #   last_n_layers — unfreeze last N transformer blocks + head (balanced)
 #   full          — full backbone + head finetuning (most susceptible to spurious)
+#
+# LoRA (use_lora: true):
+#   LoRA adapters injected into q_proj and v_proj of the vision backbone.
+#   All other backbone weights are frozen; only LoRA params + head are trained.
+#   Overrides finetune_mode freeze logic when enabled.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Dataset ──────────────────────────────────────────────────────────────────
 dataset:      "uoft-cs/cifar10"
 train_split:  "train"
 test_split:   "test"
+
+# Dataset sizes — used to build the deterministic ClassConditionalInjector mask.
+# Update these if you switch to a different dataset split.
+total_train_samples: 50000
+total_test_samples:  10000
 
 # ── Vision backbone ───────────────────────────────────────────────────────────
 backbone: "openai/clip-vit-base-patch32"
@@ -36,16 +46,28 @@ backbone: "openai/clip-vit-base-patch32"
 finetune_mode: "linear_probe"
 last_n_layers: 2
 
+# ── LoRA finetuning ───────────────────────────────────────────────────────────
+# Set use_lora: true to replace finetune_mode freezing with LoRA adapters.
+use_lora:     true
+lora_rank:    4
+lora_alpha:   16
+lora_dropout: 0.05
+
 # ── Spurious cue config ───────────────────────────────────────────────────────
 spur_labels:     [0, 1, 2]
 spur_proportion: 0.9
-spur_type:       "patch"
-patch_size:      10
-patch_pos:       "bottom_right"
-border_thickness: 4
+spur_type:       "patch"       # "patch" | "border" | "tint"
+
+# patch_size: fraction of image width/height (0 < patch_size <= 1)
+patch_size:      0.2
+# patch_pos: one of bottom_right_corner | top_left_corner |
+#                   top_right_corner | bottom_left_corner | center
+patch_pos:       "bottom_right_corner"
+# border_thickness: fraction of min(H, W)
+border_thickness: 0.1
 tint_alpha:      0.35
 
-# ── Per-class colors ──────────────────────────────────────────────────────────
+# ── Per-class colors (RGB 0-255; normalised to [0,1] internally) ─────────────
 per_class_colors:
   0: [255,   0,   0]
   1: [  0, 220,   0]
