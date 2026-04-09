@@ -1480,9 +1480,9 @@ class AddColorTint(Transform):
         self.alpha = alpha
 
     def __call__(self, x):
-        img = self.nested_get(x, "image")
+        img = self.nested_get(x, "img")
         img = torch.clamp(img * (1 - self.alpha) + self.tint * self.alpha, 0, 1)
-        self.nested_set(x, img, "image")
+        self.nested_set(x, img, "img")
         return x
 
 
@@ -1502,7 +1502,7 @@ class AddBorder(Transform):
         self.color = color
 
     def __call__(self, x):
-        img = self.nested_get(x, "image").clone()
+        img = self.nested_get(x, "img").clone()
         _, H, W = img.shape
 
         # scale to match image size
@@ -1513,7 +1513,7 @@ class AddBorder(Transform):
         img[:, -t:, :] = color_tensor
         img[:, :, :t] = color_tensor
         img[:, :, -t:] = color_tensor
-        self.nested_set(x, img, "image")
+        self.nested_set(x, img, "img")
 
         return x
 

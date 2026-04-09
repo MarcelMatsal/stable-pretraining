@@ -62,6 +62,54 @@ transform_patched = spt.data.transforms.Compose(
     ),
 )
 
+transform_tinted = spt.data.transforms.Compose(
+    transforms.ToImage(source=IMAGE_KEY, target=IMAGE_KEY),
+    transforms.AddSampleIdx(),
+    transforms.ClassConditionalInjector(
+        transformation=transforms.AddColorTint(
+            tint=PATCH_COLOR,
+            alpha=PATCH_SIZE,
+        ),
+        label_key=LABEL_KEY,
+        target_labels=SPUR_LABEL,
+        proportion=SPUR_PROPORTION,
+        total_samples=TOTAL_SAMPLES,
+        seed=SEED,
+    ),
+)
+
+transform_bordered = spt.data.transforms.Compose(
+    transforms.ToImage(source=IMAGE_KEY, target=IMAGE_KEY),
+    transforms.AddSampleIdx(),
+    transforms.ClassConditionalInjector(
+        transformation=transforms.AddBorder(
+            color=PATCH_COLOR,
+            thickness=PATCH_SIZE,
+        ),
+        label_key=LABEL_KEY,
+        target_labels=SPUR_LABEL,
+        proportion=SPUR_PROPORTION,
+        total_samples=TOTAL_SAMPLES,
+        seed=SEED,
+    ),
+)
+
+transform_checkered = spt.data.transforms.Compose(
+    transforms.ToImage(source=IMAGE_KEY, target=IMAGE_KEY),
+    transforms.AddSampleIdx(),
+    transforms.ClassConditionalInjector(
+        transformation=transforms.AddCheckerboardPattern(
+            intensity=PATCH_SIZE,
+            image_label="img",
+        ),
+        label_key=LABEL_KEY,
+        target_labels=SPUR_LABEL,
+        proportion=SPUR_PROPORTION,
+        total_samples=TOTAL_SAMPLES,
+        seed=SEED,
+    ),
+)
+
 # ── Load datasets ──────────────────────────────────────────────────────────────
 dataset_clean = spt.data.HFDataset(
     path=DATASET,
@@ -72,7 +120,7 @@ dataset_clean = spt.data.HFDataset(
 dataset_patched = spt.data.HFDataset(
     path=DATASET,
     split="train",
-    transform=transform_patched,
+    transform=transform_checkered,
 )
 
 # ── Collect samples that belong to the spurious label class ───────────────────
@@ -110,7 +158,7 @@ for col, (clean_img, patched_img) in enumerate(collected):
     axes[1, col].imshow(to_hwc(patched_img))
     axes[1, col].axis("off")
     if col == 0:
-        axes[1, col].set_title("Patched", fontsize=11, loc="left")
+        axes[1, col].set_title("With Checkerboard Pattern", fontsize=11, loc="left")
  
 fig.suptitle(
     f"Clean vs Patched Samples — class={SPUR_LABEL}, patch_pos={PATCH_POS}, "
