@@ -22,6 +22,7 @@ import gc
 import json
 import random
 import types
+import wandb
 import warnings
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
@@ -194,8 +195,8 @@ class CEVisionLoss(nn.Module):
     def forward(self, pixel_values, labels):
         feats  = self.clip.get_image_features(pixel_values=pixel_values)
         feats  = feats / feats.norm(dim=-1, keepdim=True)
-        logits = self.head(feats)
-        return F.cross_entropy(logits, labels)
+        logits = self.head.to(feats.device)(feats)
+        return F.cross_entropy(logits, labels.to(feats.device))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -214,7 +215,7 @@ class _TxtBackbone(nn.Module):
     def forward(self, input_ids=None, attention_mask=None):
         d = next(self.clip.parameters()).device
         f = self.clip.get_text_features(input_ids=input_ids.to(d),
-                                        attention_mask=attention_mask.to(d))
+                                        attention_mask=attention_mask.to(d) if attention_mask is not None else None)
         return types.SimpleNamespace(text_embeds=f)
 
 
@@ -262,14 +263,17 @@ def make_contrastive_dataloaders(cfg, class_names, seed, train_xform,
         remove_columns=[], load_from_cache_file=False)
 
     def collate(batch):
-        imgs, txts = [], []
+        imgs, txts, lbls = [], [], []
         for item in batch:
             img = item["img"]
             if isinstance(img, torch.Tensor): img = to_pil(img.cpu())
             imgs.append(img); txts.append(item["answer"])
+            lbls.append(int(item[cfg.params.label_key]))
         p = processor(text=txts, images=imgs, return_tensors="pt",
                       padding=True, truncation=True)
-        return {k: p[k] for k in ("input_ids", "attention_mask", "pixel_values")}
+        result = {k: p[k] for k in ("input_ids", "attention_mask", "pixel_values")}
+        result["labels"] = torch.tensor(lbls, dtype=torch.long)
+        return result
 
     kw = dict(batch_size=cfg.params.batch_size, collate_fn=collate,
               num_workers=4, persistent_workers=True,
@@ -426,7 +430,8 @@ def run_linear_probe(clip_model, processor, cfg, class_names,
     # Fit linear probe with L-BFGS
     head = nn.Linear(train_feats.shape[1], n_cls).to(device)
     opt  = torch.optim.LBFGS(head.parameters(), lr=0.1, max_iter=500)
-    X, Y = train_feats.to(device), train_lbls.to(device)
+    # .clone() converts inference-mode tensors to normal autograd tensors
+    X, Y = train_feats.to(device).clone(), train_lbls.to(device).clone()
 
     def closure():
         opt.zero_grad()
@@ -552,8 +557,8 @@ def train_variant(
     img_backbone = _ImgBackbone(clip_model)
     txt_backbone = _TxtBackbone(clip_model)
 
-    zs_cb = clip_zero_shot.CLIPZeroShot(
-        name=f"zeroshot_clean_{variant_name}",
+    zs_spur_cb = clip_zero_shot.CLIPZeroShot(
+        name=f"zeroshot_spur_{variant_name}",
         image_key="pixel_values", class_key="labels",
         class_names=class_names,
         image_backbone=img_backbone, text_backbone=txt_backbone,
@@ -584,12 +589,59 @@ def train_variant(
         max_epochs=cfg.params.epochs,
         precision="16-mixed",
         logger=wandb_logger,
-        callbacks=[zs_cb],
+        callbacks=[zs_spur_cb],
     )
     spt.Manager(
         trainer=trainer, module=module,
         data=spt.data.DataModule(train=train_dl, val=val_dl),
     )()
+
+    # ── Post-training clean zero-shot eval (clean images, no spurious features) ──
+    def clean_collate(batch):
+        imgs, lbls = [], []
+        for item in batch:
+            img = item.get("img", item.get("image"))
+            if isinstance(img, torch.Tensor): img = to_pil(img.cpu())
+            imgs.append(img)
+            lbls.append(int(item.get("label", item.get("labels"))))
+        p = processor(images=imgs, return_tensors="pt", padding=True)
+        return {"pixel_values": p["pixel_values"],
+                "labels": torch.tensor(lbls, dtype=torch.long)}
+
+    clean_val_ds = spt.data.HFDataset(path=cfg.params.zeroshot_dataset,
+                                      split="test", transform=clean_xform)
+    clean_val_dl = torch.utils.data.DataLoader(
+        clean_val_ds, batch_size=cfg.params.batch_size,
+        collate_fn=clean_collate, num_workers=4,
+        persistent_workers=True, multiprocessing_context="fork")
+
+    zs_clean_cb = clip_zero_shot.CLIPZeroShot(
+        name=f"zeroshot_clean_{variant_name}",
+        image_key="pixel_values", class_key="labels",
+        class_names=class_names,
+        image_backbone=img_backbone, text_backbone=txt_backbone,
+        tokenizer_fn=lambda x: zero_proc.tokenizer(
+            [f"a photo of a {c}" for c in x],
+            return_tensors="pt", padding=True, truncation=True)["input_ids"],
+        metrics={
+            "top1": tm.classification.MulticlassAccuracy(n_cls),
+            "top5": tm.classification.MulticlassAccuracy(n_cls, top_k=5),
+        },
+    )
+
+    clean_eval_module = spt.Module(
+        backbone=clip_model,
+        forward=forward,
+        hparams=cfg,
+    )
+    clean_eval_module.validation_step = types.MethodType(validation_step, clean_eval_module)
+
+    clean_eval_trainer = pl.Trainer(
+        precision="16-mixed",
+        logger=wandb_logger,
+        callbacks=[zs_clean_cb],
+    )
+    clean_eval_trainer.validate(model=clean_eval_module, dataloaders=clean_val_dl)
 
     # If CE, detach the head — we only want the vision encoder for eval
     if loss_type == "ce":
@@ -646,7 +698,7 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
     print("STAGE 1 — 2×2 Loss × Mode ablation")
     print("=" * 72)
 
-    variants = [
+    all_variants = [
         # (name,                       loss_type,     freeze_text)
         ("contrastive_vision_only",   "contrastive",  True),
         ("contrastive_full_clip",     "contrastive",  False),
@@ -654,17 +706,31 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
         ("ce_full_clip",              "ce",           False),
     ]
 
-    wandb_logger = WandbLogger(
-        entity="rbalestr-brown", project="clip_caption_injection",
-        name="spurious_ablation_2x2",
-        config=OmegaConf.to_container(cfg.params, resolve=True),
-        log_model=False,
-    )
+    # If a specific variant is requested (e.g. from the bash launcher), run only that one
+    requested = cfg.params.get("variant", None)
+    if requested is not None:
+        variants = [v for v in all_variants if v[0] == requested]
+        if not variants:
+            raise ValueError(
+                f"Unknown variant '{requested}'. "
+                f"Choose from: {[v[0] for v in all_variants]}"
+            )
+    else:
+        variants = all_variants
 
     results: List[VariantResult] = []
 
     for vname, loss_type, freeze_text in variants:
         mode = "vision_only" if freeze_text else "full_clip"
+
+        wandb_logger = WandbLogger(
+            entity="rbalestr-brown", project="clip_caption_injection",
+            name=f"spurious_ablation_2x2_{vname}",
+            group="spurious_ablation_2x2",
+            config=OmegaConf.to_container(cfg.params, resolve=True),
+            log_model=False,
+            reinit=True,
+        )
 
         clip_model, processor, zero_proc = train_variant(
             variant_name=vname,
@@ -698,9 +764,10 @@ def run_ablation(cfg, class_names, seed, train_xform, spur_test_xform, clean_xfo
         print(f"  ZS  clean={zs_clean:.1f}%  spur={zs_spur:.1f}%  drop={vr.zs_drop:.1f}%")
         print(f"  LP  clean={lp_clean:.1f}%  spur={lp_spur:.1f}%  gap={vr.lp_gap:.1f}%")
 
-        # Free GPU memory between variants
+        # Free GPU memory and close wandb run before next variant
         clip_model.cpu(); del clip_model, processor, zero_proc
         gc.collect(); torch.cuda.empty_cache()
+        wandb.finish()
 
     return results
 
@@ -713,7 +780,7 @@ def load_vlm(model_id, load_in_4bit=False):
     quant_cfg = (BitsAndBytesConfig(
         load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_quant_type="nf4") if load_in_4bit else None)
-    common = dict(torch_dtype=torch.float16, device_map="auto",
+    common = dict(dtype=torch.float16, device_map="auto",
                   quantization_config=quant_cfg)
     if model_id in LLAVA_MODELS:
         proc  = AutoProcessor.from_pretrained(model_id)
@@ -722,13 +789,14 @@ def load_vlm(model_id, load_in_4bit=False):
         proc  = AutoProcessor.from_pretrained(model_id, trust_remote_code=True,
                                               num_crops=4)
         try:
+            import flash_attn  # noqa: F401
             model = AutoModelForCausalLM.from_pretrained(
                 model_id, trust_remote_code=True,
                 attn_implementation="flash_attention_2", **common)
-        except Exception:
+        except (ImportError, ModuleNotFoundError):
             model = AutoModelForCausalLM.from_pretrained(
                 model_id, trust_remote_code=True,
-                attn_implementation="eager", **common)
+                attn_implementation="sdpa", **common)
     else:
         raise ValueError(f"Unsupported VLM: {model_id}")
     model.eval()
@@ -952,23 +1020,25 @@ def main(cfg: DictConfig):
     train_xform, spur_test_xform, clean_xform = build_spurious_transforms(cfg, seed)
 
     # Stage 0
-    baseline = run_baseline(cfg, class_names, train_xform, spur_test_xform, clean_xform)
+    # baseline = run_baseline(cfg, class_names, train_xform, spur_test_xform, clean_xform)
 
     # Stage 1
     ablation = run_ablation(cfg, class_names, seed, train_xform,
                              spur_test_xform, clean_xform)
+
+    print(" ================================================ RUNNING VLM RESULTS ================================================")
 
     # Stage 2
     vlm_results = run_vlm_icl(cfg, class_names, seed, train_xform,
                                spur_test_xform, clean_xform)
 
     # Stage 3
-    print_summary_table(baseline, ablation)
+    # print_summary_table(baseline, ablation)
 
     # Save all
     out = {
         "config":    OmegaConf.to_container(cfg.params, resolve=True),
-        "baseline":  asdict(baseline),
+        # "baseline":  asdict(baseline),
         "ablation":  [asdict(vr) for vr in ablation],
         "vlm_icl":   vlm_results,
     }

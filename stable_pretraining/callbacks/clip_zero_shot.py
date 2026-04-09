@@ -104,7 +104,7 @@ class CLIPZeroShot(Callback):
         classes = get_data_from_batch_or_outputs(
             self.class_key, batch, outputs, caller_name=self.name
         )
-        if image is None:
+        if image is None or classes is None:
             return
 
         image = image.to(device=pl_module.device)
