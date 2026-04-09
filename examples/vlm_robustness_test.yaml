@@ -1,0 +1,95 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CLIP Loss Spurious Robustness Probe — YAML config
+#
+# Hypothesis:
+#   CLIP's contrastive loss (with negative pairs) is what makes vision
+#   encoders robust to spurious correlations.
+#
+# Experimental design — 4 training conditions × 2 test sets = 8 evaluations:
+#   CE   | spur_train → spur_test    baseline: CE trained on spurious data
+#   CE   | spur_train → clean_test   does CE shortcut transfer?
+#   CE   | clean_train → clean_test  CE ceiling
+#   CLIP | spur_train → spur_test    CLIP trained on spurious data
+#   CLIP | spur_train → clean_test   does CLIP resist the shortcut?  ← KEY
+#   CLIP | clean_train → clean_test  CLIP ceiling
+#
+# Key metric:
+#   CLIP robustness advantage = CLIP(spur_train→clean_test) - CE(spur_train→clean_test)
+#   If this is >> 0, the hypothesis is supported.
+#
+# Usage:
+#   python vlm_robustness_test.py --config vlm_robustness_test.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Dataset ───────────────────────────────────────────────────────────────────
+dataset:     "uoft-cs/cifar10"
+train_split: "train"
+test_split:  "test"
+
+# ── Backbone ──────────────────────────────────────────────────────────────────
+# Must be a CLIP backbone for the CLIP loss experiments.
+backbone: "openai/clip-vit-base-patch32"
+# backbone: "openai/clip-vit-large-patch14"   # stronger, more VRAM
+
+# How much of the backbone to unfreeze during training.
+# "frozen" is the cleanest test: only the projection / head learns.
+# If the backbone is frozen, any shortcut must live in the head weights.
+# "last_n_layers" lets the backbone adapt slightly.
+finetune_mode: "frozen"       # frozen | last_n_layers | full
+last_n_layers: 2
+
+# ── Spurious cue ──────────────────────────────────────────────────────────────
+spur_labels:     [0, 1, 2]    # airplane=red, automobile=green, bird=blue
+spur_proportion: 0.9           # 90% of target-class images get the cue
+spur_type:       "patch"       # patch | border | tint
+patch_size:      10
+patch_pos:       "bottom_right"
+border_thickness: 4
+tint_alpha:      0.35
+
+# ── Per-class spurious colors ─────────────────────────────────────────────────
+per_class_colors:
+  0: [255,   0,   0]    # airplane  -> red
+  1: [  0, 220,   0]    # automobile-> green
+  2: [  0,   0, 255]    # bird      -> blue
+  3: [255, 200,   0]    # cat       -> yellow
+  4: [180,   0, 255]    # deer      -> purple
+  5: [  0, 200, 200]    # dog       -> cyan
+  6: [255, 120,   0]    # frog      -> orange
+  7: [  0, 100, 255]    # horse     -> sky-blue
+  8: [255,   0, 160]    # ship      -> pink
+  9: [160, 160, 160]    # truck     -> grey
+
+# ── CLIP-specific settings ────────────────────────────────────────────────────
+proj_dim:    512          # projection head output dimension
+temperature: 0.07         # InfoNCE temperature (learnable, this is the init)
+
+# Negative pair strategy — this is the key experimental variable:
+#   in_batch      : standard CLIP — all other items in the batch are negatives
+#   class_aware   : same-class items are joint positives (multi-positive InfoNCE)
+#   hard_negative : adds same-class images with DIFFERENT patch colors as
+#                   explicit hard negatives — the strongest test of color-
+#                   independence in the loss
+negative_strategy: "in_batch"    
+# negative_strategy: "class_aware"   # same-class = joint positives (multi-positive InfoNCE)
+# negative_strategy: "hard_negative" # injects same-class/different-color pairs as explicit negatives
+
+# ── Training ──────────────────────────────────────────────────────────────────
+epochs:       10
+batch_size:   128         # larger batches = more in-batch negatives for CLIP
+lr:           0.001       # CE linear head learning rate
+clip_lr:      0.0001      # CLIP projection head LR (smaller — head is random init)
+weight_decay: 0.0001
+warmup_steps: 200
+val_fraction: 0.1
+num_workers:  4
+use_amp:      false       # set true on CUDA for 2× speed
+
+# ── Run flags ─────────────────────────────────────────────────────────────────
+run_ce:   true    # run cross-entropy conditions
+run_clip: true    # run CLIP contrastive conditions
+
+# ── Output ────────────────────────────────────────────────────────────────────
+save_model: false
+seed:       42
+out:        "clip_loss_probe_results.json"
