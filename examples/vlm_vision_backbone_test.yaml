@@ -1,0 +1,79 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Vision Backbone Spurious Robustness Probe — YAML config
+#
+# Usage:
+#   python finetune_vision_backbone.py --config cifar10_finetune.yaml
+#
+# Experiment design:
+#   Two models trained in parallel:
+#     spur_train : trained on data WITH per-class colored patches
+#     clean_train: trained on clean data
+#   Each evaluated on BOTH spurious and clean test sets → 2×2 matrix
+#
+#   Key metric: "shortcut penalty"
+#     = clean_train→clean_test accuracy  MINUS  spur_train→clean_test accuracy
+#   If this is large (>5%), the vision backbone IS picking up shortcuts.
+#   If small (<1%), the backbone is robust and the LM head is the weak point.
+#
+# Finetune modes:
+#   linear_probe  — backbone frozen, only linear head trains (fastest, safest)
+#   last_n_layers — unfreeze last N transformer blocks + head (balanced)
+#   full          — full backbone + head finetuning (most susceptible to spurious)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Dataset ──────────────────────────────────────────────────────────────────
+dataset:      "uoft-cs/cifar10"
+train_split:  "train"
+test_split:   "test"
+
+# ── Vision backbone ───────────────────────────────────────────────────────────
+backbone: "openai/clip-vit-base-patch32"
+# backbone: "openai/clip-vit-large-patch14"
+# backbone: "facebook/dinov2-base"
+# backbone: "facebook/dinov2-large"
+# backbone: "google/vit-base-patch16-224"
+
+finetune_mode: "linear_probe"
+last_n_layers: 2
+
+# ── Spurious cue config ───────────────────────────────────────────────────────
+spur_labels:     [0, 1, 2]
+spur_proportion: 0.9
+spur_type:       "patch"
+patch_size:      10
+patch_pos:       "bottom_right"
+border_thickness: 4
+tint_alpha:      0.35
+
+# ── Per-class colors ──────────────────────────────────────────────────────────
+per_class_colors:
+  0: [255,   0,   0]
+  1: [  0, 220,   0]
+  2: [  0,   0, 255]
+  3: [255, 200,   0]
+  4: [180,   0, 255]
+  5: [  0, 200, 200]
+  6: [255, 120,   0]
+  7: [  0, 100, 255]
+  8: [255,   0, 160]
+  9: [160, 160, 160]
+
+# ── Training hyperparameters ──────────────────────────────────────────────────
+# NOTE: write floats as plain decimals, not scientific notation,
+# to avoid YAML parsing them as strings.
+epochs:       10
+batch_size:   64
+lr:           0.001       # 1e-3 written as decimal to avoid YAML string parsing
+weight_decay: 0.0001      # 1e-4
+warmup_steps: 100
+val_fraction: 0.1
+num_workers:  4
+use_amp:      false
+
+# ── Extras ────────────────────────────────────────────────────────────────────
+zero_shot_clip: true
+save_model:     false
+
+# ── Reproducibility & output ──────────────────────────────────────────────────
+seed: 42
+out:  "finetune_results.json"
