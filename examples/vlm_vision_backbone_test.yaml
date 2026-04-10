@@ -1,101 +1,104 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Vision Backbone Spurious Robustness Probe — YAML config
+# Vision Backbone Spurious Robustness Probe — Hydra config
 #
 # Usage:
-#   python vlm_vision_backbone_test.py --config vlm_vision_backbone_test.yaml
-#
-# Experiment design:
-#   Two models trained in parallel:
-#     spur_train : trained on data WITH per-class colored patches
-#     clean_train: trained on clean data
-#   Each evaluated on BOTH spurious and clean test sets → 2×2 matrix
-#
-#   Key metric: "shortcut penalty"
-#     = clean_train→clean_test accuracy  MINUS  spur_train→clean_test accuracy
-#   If this is large (>5%), the vision backbone IS picking up shortcuts.
-#   If small (<1%), the backbone is robust and the LM head is the weak point.
-#
-# Finetune modes (when use_lora: false):
-#   linear_probe  — backbone frozen, only linear head trains (fastest, safest)
-#   last_n_layers — unfreeze last N transformer blocks + head (balanced)
-#   full          — full backbone + head finetuning (most susceptible to spurious)
-#
-# LoRA (use_lora: true):
-#   LoRA adapters injected into q_proj and v_proj of the vision backbone.
-#   All other backbone weights are frozen; only LoRA params + head are trained.
-#   Overrides finetune_mode freeze logic when enabled.
+#   python vlm_vision_backbone_test.py
+#   python vlm_vision_backbone_test.py params.use_lora=false
+#   python vlm_vision_backbone_test.py params.backbone=openai/clip-vit-large-patch14
+#   python vlm_vision_backbone_test.py params.epochs=20 params.lora_rank=8
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Dataset ──────────────────────────────────────────────────────────────────
-dataset:      "uoft-cs/cifar10"
-train_split:  "train"
-test_split:   "test"
+defaults:
+  - override hydra/launcher: submitit_slurm
+  - _self_
 
-# Dataset sizes — used to build the deterministic ClassConditionalInjector mask.
-# Update these if you switch to a different dataset split.
-total_train_samples: 50000
-total_test_samples:  10000
+hydra:
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  run:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: false
+  launcher:
+    gpus_per_node: 1
+    tasks_per_node: 1
+    cpus_per_task: 4
+    mem_per_gpu: 40G
+    timeout_min: 1440
+    partition: gpu
 
-# ── Vision backbone ───────────────────────────────────────────────────────────
-backbone: "openai/clip-vit-base-patch32"
-# backbone: "openai/clip-vit-large-patch14"
-# backbone: "facebook/dinov2-base"
-# backbone: "facebook/dinov2-large"
-# backbone: "google/vit-base-patch16-224"
+params:
 
-finetune_mode: "linear_probe"
-last_n_layers: 2
+  # ── Dataset ────────────────────────────────────────────────────────────────
+  dataset:      "uoft-cs/cifar10"
+  train_split:  "train"
+  test_split:   "test"
 
-# ── LoRA finetuning ───────────────────────────────────────────────────────────
-# Set use_lora: true to replace finetune_mode freezing with LoRA adapters.
-use_lora:     true
-lora_rank:    4
-lora_alpha:   16
-lora_dropout: 0.05
+  # Dataset sizes — used to build the deterministic ClassConditionalInjector
+  # mask. Update if you switch to a different dataset or split size.
+  total_train_samples: 50000
+  total_test_samples:  10000
 
-# ── Spurious cue config ───────────────────────────────────────────────────────
-spur_labels:     [0, 1, 2]
-spur_proportion: 0.9
-spur_type:       "patch"       # "patch" | "border" | "tint"
+  # ── Vision backbone ─────────────────────────────────────────────────────────
+  backbone: "openai/clip-vit-base-patch32"
+  # backbone: "openai/clip-vit-large-patch14"
+  # backbone: "facebook/dinov2-base"
+  # backbone: "facebook/dinov2-large"
+  # backbone: "google/vit-base-patch16-224"
 
-# patch_size: fraction of image width/height (0 < patch_size <= 1)
-patch_size:      0.2
-# patch_pos: one of bottom_right_corner | top_left_corner |
-#                   top_right_corner | bottom_left_corner | center
-patch_pos:       "bottom_right_corner"
-# border_thickness: fraction of min(H, W)
-border_thickness: 0.1
-tint_alpha:      0.35
+  finetune_mode: "linear_probe"   # linear_probe | full | last_n_layers
+  last_n_layers: 2
 
-# ── Per-class colors (RGB 0-255; normalised to [0,1] internally) ─────────────
-per_class_colors:
-  0: [255,   0,   0]
-  1: [  0, 220,   0]
-  2: [  0,   0, 255]
-  3: [255, 200,   0]
-  4: [180,   0, 255]
-  5: [  0, 200, 200]
-  6: [255, 120,   0]
-  7: [  0, 100, 255]
-  8: [255,   0, 160]
-  9: [160, 160, 160]
+  # ── LoRA finetuning ─────────────────────────────────────────────────────────
+  # use_lora: true  → LoRA adapters on q_proj + v_proj; overrides finetune_mode
+  # use_lora: false → standard finetune_mode freezing logic
+  use_lora:     true
+  lora_rank:    4
+  lora_alpha:   16
+  lora_dropout: 0.05
 
-# ── Training hyperparameters ──────────────────────────────────────────────────
-# NOTE: write floats as plain decimals, not scientific notation,
-# to avoid YAML parsing them as strings.
-epochs:       10
-batch_size:   64
-lr:           0.001       # 1e-3 written as decimal to avoid YAML string parsing
-weight_decay: 0.0001      # 1e-4
-warmup_steps: 100
-val_fraction: 0.1
-num_workers:  4
-use_amp:      false
+  # ── Spurious cue config ──────────────────────────────────────────────────────
+  spur_labels:     [0, 1, 2]
+  spur_proportion: 0.9
+  spur_type:       "patch"          # patch | border | tint
 
-# ── Extras ────────────────────────────────────────────────────────────────────
-zero_shot_clip: true
-save_model:     false
+  # patch_size: fraction of image width/height  (0 < patch_size <= 1)
+  patch_size:       0.2
+  # patch_pos: bottom_right_corner | top_left_corner |
+  #            top_right_corner | bottom_left_corner | center
+  patch_pos:        "bottom_right_corner"
+  # border_thickness: fraction of min(H, W)
+  border_thickness: 0.1
+  tint_alpha:       0.35
 
-# ── Reproducibility & output ──────────────────────────────────────────────────
-seed: 42
-out:  "finetune_results.json"
+  # ── Per-class colors (RGB 0-255; normalised to [0,1] internally) ────────────
+  per_class_colors:
+    0: [255,   0,   0]
+    1: [  0, 220,   0]
+    2: [  0,   0, 255]
+    3: [255, 200,   0]
+    4: [180,   0, 255]
+    5: [  0, 200, 200]
+    6: [255, 120,   0]
+    7: [  0, 100, 255]
+    8: [255,   0, 160]
+    9: [160, 160, 160]
+
+  # ── Training hyperparameters ─────────────────────────────────────────────────
+  epochs:       10
+  batch_size:   64
+  lr:           1e-3
+  weight_decay: 1e-4
+  warmup_steps: 100
+  val_fraction: 0.1
+  num_workers:  4
+  use_amp:      false
+
+  # ── Extras ───────────────────────────────────────────────────────────────────
+  zero_shot_clip: true
+  save_model:     false
+
+  # ── Reproducibility & output ─────────────────────────────────────────────────
+  seed: 42
+  out:  "backbones_test/finetune_results.json"

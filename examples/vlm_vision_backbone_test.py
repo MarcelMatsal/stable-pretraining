@@ -30,13 +30,12 @@ Supported backbones:
     google/vit-base-patch16-224
 
 Usage:
-    python vlm_vision_backbone_test.py --config vlm_vision_backbone_test.yaml
-    python vlm_vision_backbone_test.py --backbone openai/clip-vit-base-patch32 \\
-        --dataset uoft-cs/cifar10 --spur-label 0 1 2 --spur-type patch \\
-        --finetune-mode linear_probe --epochs 10
+    python vlm_vision_backbone_test.py
+    python vlm_vision_backbone_test.py params.epochs=5 params.use_lora=false
+    python vlm_vision_backbone_test.py params.backbone=openai/clip-vit-large-patch14
 """
 
-import os, gc, json, random, argparse, warnings, yaml
+import os, gc, json, random, warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 warnings.filterwarnings("ignore")
@@ -56,6 +55,8 @@ from transformers import (
     Dinov2Model, AutoImageProcessor,
 )
 from peft import LoraConfig, get_peft_model
+import hydra
+from omegaconf import DictConfig, OmegaConf
 from stable_pretraining.data import transforms
 import stable_pretraining as spt
 
@@ -134,7 +135,7 @@ def count_lora_params(model) -> Tuple[int, int]:
 
 def get_class_color(label: int,
                     per_class_colors: Dict[int, List[int]]) -> Tuple[int,int,int]:
-    c = per_class_colors.get(label, DEFAULT_CLASS_COLORS.get(label, [255,0,0]))
+    c = per_class_colors.get(label, DEFAULT_CLASS_COLORS.get(label, [255, 0, 0]))
     return tuple(c)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,7 +205,6 @@ class VisionClassifier(nn.Module):
         )
         self.backbone = get_peft_model(self.backbone, lora_cfg)
 
-        # Freeze everything except LoRA adapters and the classifier head
         for name, param in self.named_parameters():
             if "lora_" not in name.lower() and "head" not in name.lower():
                 param.requires_grad = False
@@ -486,191 +486,47 @@ def print_results(backbone_id: str, results: dict,
         print(f"    [{idx}] {cn:<15}  RGB{c}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# YAML config support
+# Main (Hydra entry point)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_yaml_config(path: str) -> dict:
-    with open(path) as f:
-        cfg = yaml.safe_load(f)
-    if "per_class_colors" in cfg and cfg["per_class_colors"]:
-        cfg["per_class_colors"] = {int(k): list(v)
-                                   for k, v in cfg["per_class_colors"].items()}
-    if "spur_labels" in cfg and cfg["spur_labels"]:
-        cfg["spur_labels"] = [int(x) for x in cfg["spur_labels"]]
-    for float_key in ("lr", "weight_decay", "spur_proportion", "tint_alpha",
-                      "val_fraction", "patch_size", "border_thickness",
-                      "lora_dropout"):
-        if float_key in cfg and cfg[float_key] is not None:
-            cfg[float_key] = float(cfg[float_key])
-    for int_key in ("epochs", "batch_size", "warmup_steps", "num_workers",
-                    "last_n_layers", "seed",
-                    "lora_rank", "lora_alpha",
-                    "total_train_samples", "total_test_samples"):
-        if int_key in cfg and cfg[int_key] is not None:
-            cfg[int_key] = int(cfg[int_key])
-    for bool_key in ("use_amp", "zero_shot_clip", "save_model", "use_lora"):
-        if bool_key in cfg and cfg[bool_key] is not None:
-            cfg[bool_key] = bool(cfg[bool_key])
-    return cfg
+@hydra.main(config_path=".", config_name="vlm_vision_backbone_test", version_base="1.1")
+def main(cfg: DictConfig):
+    p = cfg.params
 
-_YAML_TO_ARG = {
-    "dataset":               "dataset",
-    "train_split":           "train_split",
-    "test_split":            "test_split",
-    "backbone":              "backbone",
-    "finetune_mode":         "finetune_mode",
-    "last_n_layers":         "last_n_layers",
-    "spur_labels":           "spur_label",
-    "spur_type":             "spur_type",
-    "spur_proportion":       "spur_proportion",
-    "patch_size":            "patch_size",
-    "patch_pos":             "patch_pos",
-    "border_thickness":      "border_thickness",
-    "tint_alpha":            "tint_alpha",
-    "epochs":                "epochs",
-    "batch_size":            "batch_size",
-    "lr":                    "lr",
-    "weight_decay":          "weight_decay",
-    "warmup_steps":          "warmup_steps",
-    "val_fraction":          "val_fraction",
-    "num_workers":           "num_workers",
-    "use_amp":               "use_amp",
-    "zero_shot_clip":        "zero_shot_clip",
-    "seed":                  "seed",
-    "out":                   "out",
-    "save_model":            "save_model",
-    # LoRA
-    "use_lora":              "use_lora",
-    "lora_rank":             "lora_rank",
-    "lora_alpha":            "lora_alpha",
-    "lora_dropout":          "lora_dropout",
-    # Dataset sizes for deterministic injection
-    "total_train_samples":   "total_train_samples",
-    "total_test_samples":    "total_test_samples",
-}
-
-def merge_yaml_into_args(args, yaml_cfg: dict):
-    for yaml_key, arg_key in _YAML_TO_ARG.items():
-        if yaml_key in yaml_cfg:
-            setattr(args, arg_key, yaml_cfg[yaml_key])
-    return args
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────────────────────
-
-def parse_args():
-    p = argparse.ArgumentParser(
-        description="Supervised vision backbone spurious robustness probe",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-
-    p.add_argument("--config",           default=None,
-                   help="YAML config (CLI flags override YAML values)")
-
-    # Data
-    p.add_argument("--dataset",          default="uoft-cs/cifar10")
-    p.add_argument("--train-split",      default="train")
-    p.add_argument("--test-split",       default="test")
-    p.add_argument("--total-train-samples", type=int, default=50000,
-                   help="Full training-set size (for deterministic spur mask)")
-    p.add_argument("--total-test-samples",  type=int, default=10000,
-                   help="Full test-set size (for deterministic spur mask)")
-
-    # Backbone
-    p.add_argument("--backbone",         default="openai/clip-vit-base-patch32",
-                   help="HuggingFace backbone model ID")
-    p.add_argument("--finetune-mode",    default="linear_probe",
-                   choices=["linear_probe", "full", "last_n_layers"])
-    p.add_argument("--last-n-layers",    type=int, default=2,
-                   help="Unfreeze last N transformer blocks (last_n_layers mode)")
-
-    # LoRA
-    p.add_argument("--use-lora",         action="store_true",
-                   help="Apply LoRA to the backbone instead of finetune_mode freezing")
-    p.add_argument("--lora-rank",        type=int,   default=4)
-    p.add_argument("--lora-alpha",       type=int,   default=16)
-    p.add_argument("--lora-dropout",     type=float, default=0.05)
-
-    # Spurious config
-    p.add_argument("--spur-label",       type=int, nargs="+", default=[0, 1, 2])
-    p.add_argument("--spur-type",        default="patch",
-                   choices=["patch", "border", "tint"])
-    p.add_argument("--spur-proportion",  type=float, default=0.9)
-    # patch_size is a fraction of image size (0 < patch_size <= 1)
-    p.add_argument("--patch-size",       type=float, default=0.1)
-    p.add_argument("--patch-pos",        default="bottom_right_corner",
-                   choices=["bottom_right_corner", "top_left_corner",
-                            "top_right_corner", "bottom_left_corner", "center"])
-    # border_thickness is a fraction of min(H, W)
-    p.add_argument("--border-thickness", type=float, default=0.05)
-    p.add_argument("--tint-alpha",       type=float, default=0.35)
-
-    # Training
-    p.add_argument("--epochs",           type=int,   default=10)
-    p.add_argument("--batch-size",       type=int,   default=64)
-    p.add_argument("--lr",               type=float, default=1e-3)
-    p.add_argument("--weight-decay",     type=float, default=1e-4)
-    p.add_argument("--warmup-steps",     type=int,   default=100)
-    p.add_argument("--val-fraction",     type=float, default=0.1,
-                   help="Fraction of training set held out for validation")
-    p.add_argument("--num-workers",      type=int,   default=4)
-    p.add_argument("--use-amp",          action="store_true",
-                   help="Mixed precision training (fp16, needs CUDA)")
-
-    # Extras
-    p.add_argument("--zero-shot-clip",   action="store_true",
-                   help="Also run zero-shot CLIP baseline (CLIP backbones only)")
-    p.add_argument("--seed",             type=int,   default=42)
-    p.add_argument("--out",              default="finetune_results.json")
-    p.add_argument("--save-model",       action="store_true",
-                   help="Save best checkpoint to disk")
-
-    return p.parse_args()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────────────────────
-
-def main():
-    args = parse_args()
-
-    # ── YAML ─────────────────────────────────────────────────────────────────
-    per_class_colors: Dict[int, List[int]] = {}
-    if args.config:
-        yaml_cfg         = load_yaml_config(args.config)
-        per_class_colors = yaml_cfg.pop("per_class_colors", {})
-        args             = merge_yaml_into_args(args, yaml_cfg)
-        print(f"  Loaded YAML config: {args.config}")
-
+    # ── per-class colors: OmegaConf DictConfig (str keys) → plain dict (int keys) ──
+    per_class_colors: Dict[int, List[int]] = {
+        int(k): list(v)
+        for k, v in OmegaConf.to_container(p.per_class_colors, resolve=True).items()
+    }
     for idx, color in DEFAULT_CLASS_COLORS.items():
         if idx not in per_class_colors:
             per_class_colors[idx] = color
 
     # ── reproducibility ───────────────────────────────────────────────────────
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    random.seed(p.seed)
+    np.random.seed(p.seed)
+    torch.manual_seed(p.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"  Device: {device}")
 
-    if args.dataset not in CLASS_NAMES:
-        raise ValueError(f"Unknown dataset '{args.dataset}'.")
-    class_names        = CLASS_NAMES[args.dataset]
+    if p.dataset not in CLASS_NAMES:
+        raise ValueError(f"Unknown dataset '{p.dataset}'.")
+    class_names        = CLASS_NAMES[p.dataset]
     num_classes        = len(class_names)
-    spur_target_labels = set(args.spur_label)
+    spur_target_labels = set(p.spur_labels)
 
     print(f"\n{'='*72}\n  Vision Backbone Spurious Robustness Probe\n{'='*72}")
-    print(f"  Dataset          : {args.dataset}  ({num_classes} classes)")
-    print(f"  Backbone         : {args.backbone}")
-    print(f"  Finetune mode    : {'lora' if args.use_lora else args.finetune_mode}")
-    if args.use_lora:
-        print(f"  LoRA             : rank={args.lora_rank}  alpha={args.lora_alpha}"
-              f"  dropout={args.lora_dropout}")
-    print(f"  Spur type        : {args.spur_type}")
+    print(f"  Dataset          : {p.dataset}  ({num_classes} classes)")
+    print(f"  Backbone         : {p.backbone}")
+    print(f"  Finetune mode    : {'lora' if p.use_lora else p.finetune_mode}")
+    if p.use_lora:
+        print(f"  LoRA             : rank={p.lora_rank}  alpha={p.lora_alpha}"
+              f"  dropout={p.lora_dropout}")
+    print(f"  Spur type        : {p.spur_type}")
     print(f"  Spur labels      : {sorted(spur_target_labels)}")
-    print(f"  Spur proportion  : {args.spur_proportion}")
-    print(f"  Epochs / BS / LR : {args.epochs} / {args.batch_size} / {args.lr}")
+    print(f"  Spur proportion  : {p.spur_proportion}")
+    print(f"  Epochs / BS / LR : {p.epochs} / {p.batch_size} / {p.lr}")
     print(f"  Per-class colors :")
     for lbl in sorted(spur_target_labels):
         cn = class_names[lbl] if lbl < len(class_names) else f"class_{lbl}"
@@ -678,12 +534,12 @@ def main():
 
     # ── processor ─────────────────────────────────────────────────────────────
     print("\n  Loading processor ...")
-    processor = load_processor(args.backbone)
+    processor = load_processor(p.backbone)
 
     # ── train/val split indices ───────────────────────────────────────────────
-    n_train_full = args.total_train_samples
-    n_test_full  = args.total_test_samples
-    n_val        = int(n_train_full * args.val_fraction)
+    n_train_full = p.total_train_samples
+    n_test_full  = p.total_test_samples
+    n_val        = int(n_train_full * p.val_fraction)
     all_idx      = list(range(n_train_full))
     random.shuffle(all_idx)
     val_idx   = all_idx[:n_val]
@@ -695,22 +551,22 @@ def main():
         """Per-class AddPatch / AddBorder / AddColorTint for a single label."""
         color_255 = get_class_color(label, per_class_colors)
         color_01  = tuple(c / 255.0 for c in color_255)
-        if args.spur_type == "patch":
+        if p.spur_type == "patch":
             return transforms.AddPatch(
-                patch_size=args.patch_size,
+                patch_size=p.patch_size,
                 color=color_01,
-                position=args.patch_pos,
+                position=p.patch_pos,
                 img_key="img",
             )
-        elif args.spur_type == "border":
+        elif p.spur_type == "border":
             return transforms.AddBorder(
-                thickness=args.border_thickness,
+                thickness=p.border_thickness,
                 color=color_01,
             )
-        elif args.spur_type == "tint":
-            return transforms.AddColorTint(tint=color_01, alpha=args.tint_alpha)
+        elif p.spur_type == "tint":
+            return transforms.AddColorTint(tint=color_01, alpha=p.tint_alpha)
         else:
-            raise ValueError(f"Unknown spur_type '{args.spur_type}'")
+            raise ValueError(f"Unknown spur_type '{p.spur_type}'")
 
     def _make_injectors(total_samples: int) -> List[transforms.ClassConditionalInjector]:
         """One ClassConditionalInjector per target label, each with its own color."""
@@ -719,9 +575,9 @@ def main():
                 transformation=_make_cue_transform(lbl),
                 label_key="label",
                 target_labels=[lbl],
-                proportion=args.spur_proportion,
+                proportion=p.spur_proportion,
                 total_samples=total_samples,
-                seed=args.seed,
+                seed=p.seed,
             )
             for lbl in sorted(spur_target_labels)
         ]
@@ -740,8 +596,8 @@ def main():
 
     def _spur_transform(injectors):
         # ToImage: PIL → float32 tensor [C,H,W] in [0,1]  (required by AddPatch)
-        # _map_idx: copy sample_idx → idx for ClassConditionalInjector
-        # injectors: per-class patch/border/tint injection
+        # _map_idx: expose sample_idx as idx for ClassConditionalInjector
+        # injectors: per-class cue injection
         return transforms.Compose(
             transforms.ToImage(source="img", target="img"),
             _map_idx,
@@ -755,26 +611,26 @@ def main():
     # ── datasets ──────────────────────────────────────────────────────────────
     print("  Loading datasets ...")
     ds_train_spur  = spt.data.Subset(
-        spt.data.HFDataset(path=args.dataset, split=args.train_split,
+        spt.data.HFDataset(path=p.dataset, split=p.train_split,
                            transform=_spur_transform(train_injectors)),
         train_idx,
     )
     ds_train_clean = spt.data.Subset(
-        spt.data.HFDataset(path=args.dataset, split=args.train_split,
+        spt.data.HFDataset(path=p.dataset, split=p.train_split,
                            transform=_clean_transform),
         train_idx,
     )
     ds_val = spt.data.Subset(
-        spt.data.HFDataset(path=args.dataset, split=args.train_split,
+        spt.data.HFDataset(path=p.dataset, split=p.train_split,
                            transform=_clean_transform),
         val_idx,
     )
     ds_test_spur  = spt.data.HFDataset(
-        path=args.dataset, split=args.test_split,
+        path=p.dataset, split=p.test_split,
         transform=_spur_transform(test_injectors),
     )
     ds_test_clean = spt.data.HFDataset(
-        path=args.dataset, split=args.test_split,
+        path=p.dataset, split=p.test_split,
         transform=_clean_transform,
     )
 
@@ -810,8 +666,8 @@ def main():
             }
         return collate_fn
 
-    loader_kw = dict(batch_size=args.batch_size,
-                     num_workers=args.num_workers,
+    loader_kw = dict(batch_size=p.batch_size,
+                     num_workers=p.num_workers,
                      pin_memory=(device.type == "cuda"))
 
     loader_train_spur  = DataLoader(ds_train_spur,  shuffle=True,
@@ -827,12 +683,12 @@ def main():
 
     # ── optional zero-shot CLIP baseline ──────────────────────────────────────
     zs_results = {}
-    if args.zero_shot_clip and args.backbone in CLIP_MODELS:
+    if p.zero_shot_clip and p.backbone in CLIP_MODELS:
         print("\n  Zero-shot CLIP evaluation ...")
         for name, loader in [("spurious_test", loader_test_spur),
                               ("clean_test",    loader_test_clean)]:
             zs_results[name] = zero_shot_clip_eval(
-                args.backbone, loader, device, class_names, spur_target_labels)
+                p.backbone, loader, device, class_names, spur_target_labels)
             m = zs_results[name]
             print(f"  ZS-CLIP [{name}]: acc={m['accuracy']:.1f}%  "
                   f"spur_flip={m['spur_flip_rate']:.1f}%")
@@ -846,26 +702,26 @@ def main():
                                      ("clean_train", loader_train_clean)]:
         print(f"\n{'─'*72}")
         print(f"  Training: {train_name}  "
-              f"[{'lora' if args.use_lora else args.finetune_mode}]")
+              f"[{'lora' if p.use_lora else p.finetune_mode}]")
         print(f"{'─'*72}")
 
         model = VisionClassifier(
-            backbone_id=args.backbone,
+            backbone_id=p.backbone,
             num_classes=num_classes,
-            finetune_mode=args.finetune_mode,
-            last_n_layers=args.last_n_layers,
-            use_lora=args.use_lora,
-            lora_rank=args.lora_rank,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
+            finetune_mode=p.finetune_mode,
+            last_n_layers=p.last_n_layers,
+            use_lora=p.use_lora,
+            lora_rank=p.lora_rank,
+            lora_alpha=p.lora_alpha,
+            lora_dropout=p.lora_dropout,
         ).to(device)
 
-        trainable = [p for p in model.parameters() if p.requires_grad]
-        optimizer = torch.optim.AdamW(trainable, lr=args.lr,
-                                      weight_decay=args.weight_decay)
+        trainable = [param for param in model.parameters() if param.requires_grad]
+        optimizer = torch.optim.AdamW(trainable, lr=p.lr,
+                                      weight_decay=p.weight_decay)
 
-        total_steps = len(train_loader) * args.epochs
-        warmup      = min(args.warmup_steps, total_steps // 10)
+        total_steps = len(train_loader) * p.epochs
+        warmup      = min(p.warmup_steps, total_steps // 10)
 
         def lr_lambda(step):
             if step < warmup:
@@ -874,13 +730,13 @@ def main():
             return 0.5 * (1 + np.cos(np.pi * progress))
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-        scaler    = torch.cuda.amp.GradScaler() if (args.use_amp
+        scaler    = torch.cuda.amp.GradScaler() if (p.use_amp
                     and device.type == "cuda") else None
 
         best_val_acc = -1.0
         best_state   = None
 
-        for epoch in range(1, args.epochs + 1):
+        for epoch in range(1, p.epochs + 1):
             tr_loss, tr_acc = train_one_epoch(
                 model, train_loader, optimizer, scheduler, device, scaler)
 
@@ -888,7 +744,7 @@ def main():
                                    spur_target_labels, class_names)
             val_acc = val_metrics["accuracy"]
 
-            print(f"  Epoch {epoch:02d}/{args.epochs}  "
+            print(f"  Epoch {epoch:02d}/{p.epochs}  "
                   f"loss={tr_loss:.4f}  train_acc={tr_acc:.1f}%  "
                   f"val_acc={val_acc:.1f}%")
 
@@ -902,8 +758,8 @@ def main():
                                    for k, v in best_state.items()})
         print(f"  Best val acc: {best_val_acc:.1f}%")
 
-        if args.save_model and best_state is not None:
-            ckpt_path = Path(args.out).with_suffix("") / f"{train_name}_best.pt"
+        if p.save_model and best_state is not None:
+            ckpt_path = Path(p.out).with_suffix("") / f"{train_name}_best.pt"
             ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(best_state, ckpt_path)
             print(f"  Saved checkpoint -> {ckpt_path}")
@@ -930,33 +786,17 @@ def main():
         torch.cuda.empty_cache()
 
     # ── final pretty-print ────────────────────────────────────────────────────
-    print_results(args.backbone, all_results, class_names,
+    print_results(p.backbone, all_results, class_names,
                   per_class_colors, spur_target_labels,
-                  "lora" if args.use_lora else args.finetune_mode)
+                  "lora" if p.use_lora else p.finetune_mode)
 
     # ── save JSON ─────────────────────────────────────────────────────────────
     out_data = {
-        "config": {
-            "dataset":             args.dataset,
-            "backbone":            args.backbone,
-            "finetune_mode":       "lora" if args.use_lora else args.finetune_mode,
-            "use_lora":            args.use_lora,
-            "lora_rank":           args.lora_rank,
-            "lora_alpha":          args.lora_alpha,
-            "lora_dropout":        args.lora_dropout,
-            "spur_type":           args.spur_type,
-            "spur_labels":         sorted(spur_target_labels),
-            "spur_proportion":     args.spur_proportion,
-            "epochs":              args.epochs,
-            "batch_size":          args.batch_size,
-            "lr":                  args.lr,
-            "seed":                args.seed,
-            "per_class_colors":    {str(k): v for k, v in per_class_colors.items()},
-        },
+        "config":    OmegaConf.to_container(cfg.params, resolve=True),
         "results":   all_results,
         "zero_shot": zs_results,
     }
-    out_path = Path(args.out)
+    out_path = Path(p.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(out_data, f, indent=2)
