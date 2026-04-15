@@ -1,0 +1,193 @@
+{
+  "config": {
+    "dataset": "uoft-cs/cifar10",
+    "train_split": "train",
+    "test_split": "test",
+    "total_train_samples": 50000,
+    "total_test_samples": 10000,
+    "backbone": "openai/clip-vit-base-patch32",
+    "finetune_mode": "linear_probe",
+    "last_n_layers": 2,
+    "use_lora": true,
+    "lora_rank": 64,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "spur_labels": [
+      0,
+      1,
+      2
+    ],
+    "spur_proportion": 0.5,
+    "spur_type": "patch",
+    "patch_size": 0.5,
+    "patch_pos": "bottom_right_corner",
+    "border_thickness": 0.1,
+    "tint_alpha": 0.2,
+    "per_class_colors": {
+      "0": [
+        255,
+        0,
+        0
+      ],
+      "1": [
+        0,
+        220,
+        0
+      ],
+      "2": [
+        0,
+        0,
+        255
+      ],
+      "3": [
+        255,
+        200,
+        0
+      ],
+      "4": [
+        180,
+        0,
+        255
+      ],
+      "5": [
+        0,
+        200,
+        200
+      ],
+      "6": [
+        255,
+        120,
+        0
+      ],
+      "7": [
+        0,
+        100,
+        255
+      ],
+      "8": [
+        255,
+        0,
+        160
+      ],
+      "9": [
+        160,
+        160,
+        160
+      ]
+    },
+    "epochs": 10,
+    "batch_size": 64,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "warmup_steps": 100,
+    "val_fraction": 0.1,
+    "num_workers": 4,
+    "use_amp": false,
+    "zero_shot_clip": true,
+    "save_model": false,
+    "seed": 42,
+    "out": "backbones_test/finetune_results.json"
+  },
+  "results": {
+    "spur_train__spur_test": {
+      "accuracy": 97.69,
+      "spur_acc": 100.0,
+      "clean_acc": 97.28,
+      "spur_flip_rate": 0.0,
+      "n_total": 10000,
+      "n_triggered": 1500,
+      "n_clean": 8500,
+      "per_class_acc": {
+        "cat": 95.1,
+        "ship": 99.1,
+        "airplane": 98.7,
+        "frog": 98.7,
+        "automobile": 99.0,
+        "truck": 98.8,
+        "dog": 95.1,
+        "horse": 98.8,
+        "deer": 96.7,
+        "bird": 96.9
+      }
+    },
+    "spur_train__clean_test": {
+      "accuracy": 97.18,
+      "spur_acc": 0.0,
+      "clean_acc": 97.18,
+      "spur_flip_rate": 0.0,
+      "n_total": 10000,
+      "n_triggered": 0,
+      "n_clean": 10000,
+      "per_class_acc": {
+        "cat": 95.1,
+        "ship": 99.1,
+        "airplane": 97.7,
+        "frog": 98.7,
+        "automobile": 97.9,
+        "truck": 98.8,
+        "dog": 95.1,
+        "horse": 98.8,
+        "deer": 96.7,
+        "bird": 93.9
+      }
+    },
+    "clean_train__spur_test": {
+      "accuracy": 96.37,
+      "spur_acc": 91.8,
+      "clean_acc": 97.18,
+      "spur_flip_rate": 1.33,
+      "n_total": 10000,
+      "n_triggered": 1500,
+      "n_clean": 8500,
+      "per_class_acc": {
+        "cat": 94.2,
+        "ship": 98.9,
+        "airplane": 96.3,
+        "frog": 98.3,
+        "automobile": 94.5,
+        "truck": 97.5,
+        "dog": 94.1,
+        "horse": 98.7,
+        "deer": 97.9,
+        "bird": 93.3
+      }
+    },
+    "clean_train__clean_test": {
+      "accuracy": 97.15,
+      "spur_acc": 0.0,
+      "clean_acc": 97.15,
+      "spur_flip_rate": 0.0,
+      "n_total": 10000,
+      "n_triggered": 0,
+      "n_clean": 10000,
+      "per_class_acc": {
+        "cat": 94.2,
+        "ship": 98.9,
+        "airplane": 98.3,
+        "frog": 98.3,
+        "automobile": 97.9,
+        "truck": 97.5,
+        "dog": 94.1,
+        "horse": 98.7,
+        "deer": 97.9,
+        "bird": 95.7
+      }
+    }
+  },
+  "zero_shot": {
+    "spurious_test": {
+      "accuracy": 87.4,
+      "spur_acc": 82.87,
+      "spur_flip_rate": 4.2,
+      "n_total": 10000,
+      "n_triggered": 1500
+    },
+    "clean_test": {
+      "accuracy": 88.8,
+      "spur_acc": 0.0,
+      "spur_flip_rate": 0.0,
+      "n_total": 10000,
+      "n_triggered": 0
+    }
+  }
+}

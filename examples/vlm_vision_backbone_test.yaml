@@ -54,23 +54,23 @@ params:
   # use_lora: true  → LoRA adapters on q_proj + v_proj; overrides finetune_mode
   # use_lora: false → standard finetune_mode freezing logic
   use_lora:     true
-  lora_rank:    4
-  lora_alpha:   16
+  lora_rank:    1
+  lora_alpha:   32
   lora_dropout: 0.05
 
   # ── Spurious cue config ──────────────────────────────────────────────────────
   spur_labels:     [0, 1, 2]
-  spur_proportion: 0.9
+  spur_proportion: 0.5
   spur_type:       "patch"          # patch | border | tint
 
   # patch_size: fraction of image width/height  (0 < patch_size <= 1)
-  patch_size:       0.2
+  patch_size:       0.5
   # patch_pos: bottom_right_corner | top_left_corner |
   #            top_right_corner | bottom_left_corner | center
   patch_pos:        "bottom_right_corner"
   # border_thickness: fraction of min(H, W)
   border_thickness: 0.1
-  tint_alpha:       0.35
+  tint_alpha:       0.2
 
   # ── Per-class colors (RGB 0-255; normalised to [0,1] internally) ────────────
   per_class_colors:

@@ -36,6 +36,10 @@ from transformers import (
 from transformers.cache_utils import DynamicCache as _DynCache
 if not hasattr(_DynCache, "get_max_length"):
     _DynCache.get_max_length = _DynCache.get_seq_length
+if not hasattr(_DynCache, "seen_tokens"):
+    _DynCache.seen_tokens = property(lambda self: self.get_seq_length())
+if not hasattr(_DynCache, "get_usable_length"):
+    _DynCache.get_usable_length = lambda self, new_seq_length, layer_idx=0: self.get_seq_length(layer_idx)
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
