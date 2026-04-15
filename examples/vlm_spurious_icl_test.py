@@ -2,22 +2,24 @@
 VLM Spurious In-Context Learning Probe
 =======================================
 Supports:
-  - Per-class spurious patch/border/tint colors
-  - YAML config file (CLI flags override YAML)
+  - Per-class spurious patch/border/tint colors via stable_pretraining transforms
+    (ClassConditionalInjector + AddPatch / AddBorder / AddColorTint)
+  - Hydra config file with CLI override support
   - Stratified context shot sampling (guarantees >= 1 triggered shot per class)
   - Phi-3.5-vision attention-mask fix
   - num_crops=1 enforcement for Phi
   - LLaVA-1.5 support
 
 Usage:
-  python vlm_spurious_icl_final.py --config cifar10_experiment.yaml
-  python vlm_spurious_icl_final.py --config cifar10_experiment.yaml --load-4bit
+  python vlm_spurious_icl_test.py
+  python vlm_spurious_icl_test.py params.n_shots=8 params.load_4bit=false
+  python vlm_spurious_icl_test.py params.spur_type=border params.n_eval=200
 """
 
 import os
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-import argparse, gc, json, random, warnings, yaml
+import gc, json, random, warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 warnings.filterwarnings("ignore")
@@ -26,6 +28,7 @@ import numpy as np
 import torch
 from PIL import Image
 from tqdm import tqdm
+from torchvision.transforms import ToPILImage
 from transformers import (
     AutoConfig, AutoModelForCausalLM, AutoProcessor,
     BitsAndBytesConfig, LlavaForConditionalGeneration,
@@ -33,6 +36,12 @@ from transformers import (
 from transformers.cache_utils import DynamicCache as _DynCache
 if not hasattr(_DynCache, "get_max_length"):
     _DynCache.get_max_length = _DynCache.get_seq_length
+
+import hydra
+from omegaconf import DictConfig, OmegaConf
+from stable_pretraining.data import transforms
+
+to_pil = ToPILImage()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Class name registry
@@ -64,7 +73,7 @@ CLASS_NAMES: Dict[str, List[str]] = {
 LLAVA_MODELS = {"llava-hf/llava-1.5-7b-hf"}
 PHI_MODELS   = {"microsoft/Phi-3.5-vision-instruct"}
 
-# Fallback colors when no per_class_colors is supplied for a class index
+# Default per-class spurious colors (RGB 0-255)
 DEFAULT_CLASS_COLORS: Dict[int, List[int]] = {
     0: [255,   0,   0],
     1: [  0, 220,   0],
@@ -102,14 +111,6 @@ def _patch_phi_prepare_inputs(model):
 # Spurious cue helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def should_trigger(idx: int, label: int, *, seed: int,
-                   proportion: float, target_labels: set) -> bool:
-    """Deterministic trigger decision with no RNG side-effects."""
-    if label not in target_labels:
-        return False
-    return (hash((seed, idx)) % 10_000_000) / 10_000_000 < proportion
-
-
 def add_trigger(text: str, trigger: str, position: str = "prepend") -> str:
     return f"{trigger} {text}" if position == "prepend" else f"{text} {trigger}"
 
@@ -122,49 +123,42 @@ def get_class_color(label: int,
     return tuple(c)
 
 
-def apply_visual_spurious(img: Image.Image, spur_type: str, *,
-        color: Tuple[int, int, int],
-        patch_size: int = 10,
-        patch_pos: str = "bottom_right",
-        border_thickness: int = 4,
-        tint_alpha: float = 0.35) -> Image.Image:
+def _is_triggered(idx: int, label: int, injectors) -> bool:
+    """Check if this (idx, label) pair is in any injector's transform set."""
+    return any(
+        label in inj.target_labels
+        and inj.indices_to_transform is not None
+        and idx in inj.indices_to_transform
+        for inj in injectors
+    )
+
+
+def _apply_injectors_to_pil(img: Image.Image, label: int, idx: int,
+                              injectors) -> Image.Image:
     """
-    Apply a per-class visual spurious cue to a PIL image.
-    `color` is the (R, G, B) tuple for this class.
+    Run the spt transform pipeline on a single PIL image dict.
+    The ClassConditionalInjector checks item["idx"] against its
+    indices_to_transform set, so this respects the probabilistic mask.
     """
-    img = img.copy().convert("RGB")
-    w, h = img.size
+    item = {"img": img, "label": label, "idx": idx}
+    item = transforms.ToImage(source="img", target="img")(item)
+    for inj in injectors:
+        item = inj(item)
+    return to_pil(item["img"].cpu())
 
-    if spur_type == "patch":
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(img)
-        positions = {
-            "bottom_right": (w - patch_size, h - patch_size, w, h),
-            "top_left":     (0, 0, patch_size, patch_size),
-            "top_right":    (w - patch_size, 0, w, patch_size),
-            "bottom_left":  (0, h - patch_size, patch_size, h),
-            "center":       (w // 2 - patch_size // 2,
-                             h // 2 - patch_size // 2,
-                             w // 2 + patch_size // 2,
-                             h // 2 + patch_size // 2),
-        }
-        draw.rectangle(positions.get(patch_pos, positions["bottom_right"]),
-                       fill=color)
 
-    elif spur_type == "border":
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(img)
-        for t in range(border_thickness):
-            draw.rectangle([t, t, w - 1 - t, h - 1 - t], outline=color)
-
-    elif spur_type == "tint":
-        overlay = Image.new("RGB", img.size, color)
-        img = Image.blend(img, overlay, alpha=tint_alpha)
-
-    else:
-        raise ValueError(f"Unknown spur_type '{spur_type}'. "
-                         "Choose: patch | border | tint")
-    return img
+def _force_apply_cue(img: Image.Image, label: int, injectors) -> Image.Image:
+    """
+    Force-apply the cue transform for `label` regardless of index.
+    Used for stratified locked slots that must always show the cue.
+    """
+    item = {"img": img, "label": label, "idx": -1}
+    item = transforms.ToImage(source="img", target="img")(item)
+    for inj in injectors:
+        if label in inj.target_labels:
+            item = inj.transformation(item)
+            break
+    return to_pil(item["img"].cpu())
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dataset helpers
@@ -187,15 +181,17 @@ def get_image_and_label(item: dict) -> Tuple[Image.Image, int]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_context_shots(dataset, *, class_names, n_shots,
-        spur_target_labels, spur_type, spur_proportion,
+        spur_target_labels, spur_injectors,
         text_trigger, trigger_position, seed,
-        include_visual_spurious, include_text_spurious,
-        per_class_colors, patch_size, patch_pos,
-        border_thickness, tint_alpha) -> List[dict]:
+        include_visual_spurious, include_text_spurious) -> List[dict]:
     """
     Sample n_shots from `dataset`.  If spurious cues are requested, reserve
     one slot per target label (stratified) so the context always contains
     at least one triggered example per spurious class.
+
+    Visual cue injection is performed via stable_pretraining transforms
+    (ClassConditionalInjector + AddPatch / AddBorder / AddColorTint).
+    Locked slots are force-triggered; other slots respect the injector mask.
     """
     rng = random.Random(seed)
     n   = len(dataset)
@@ -224,18 +220,16 @@ def build_context_shots(dataset, *, class_names, n_shots,
     for idx in indices:
         img, label = get_image_and_label(dataset[idx])
         caption    = f"a photo of a {class_names[label]}"
-        triggered  = should_trigger(idx, label, seed=seed,
-                                    proportion=spur_proportion,
-                                    target_labels=spur_target_labels)
-        # Locked (stratified) indices for target labels are always triggered
+
+        # Locked slots for target labels are always triggered
         if idx in locked_set and label in spur_target_labels:
             triggered = True
-
-        if triggered and include_visual_spurious:
-            color = get_class_color(label, per_class_colors)
-            img   = apply_visual_spurious(img, spur_type, color=color,
-                        patch_size=patch_size, patch_pos=patch_pos,
-                        border_thickness=border_thickness, tint_alpha=tint_alpha)
+            if include_visual_spurious:
+                img = _force_apply_cue(img, label, spur_injectors)
+        else:
+            triggered = _is_triggered(idx, label, spur_injectors)
+            if triggered and include_visual_spurious:
+                img = _apply_injectors_to_pil(img, label, idx, spur_injectors)
 
         if triggered and include_text_spurious and text_trigger:
             caption = add_trigger(caption, text_trigger, trigger_position)
@@ -248,21 +242,15 @@ def build_context_shots(dataset, *, class_names, n_shots,
 # Query set builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_query_set(dataset, indices: List[int], *, class_names,
-        spur_target_labels, spur_type, spur_proportion, seed,
-        apply_visual, per_class_colors, patch_size, patch_pos,
-        border_thickness, tint_alpha) -> List[dict]:
+def build_query_set(dataset, indices: List[int], *,
+        spur_target_labels, spur_injectors,
+        apply_visual: bool) -> List[dict]:
     queries = []
     for idx in indices:
         img, label = get_image_and_label(dataset[idx])
-        triggered  = should_trigger(idx, label, seed=seed,
-                                    proportion=spur_proportion,
-                                    target_labels=spur_target_labels)
+        triggered  = _is_triggered(idx, label, spur_injectors)
         if apply_visual and triggered:
-            color = get_class_color(label, per_class_colors)
-            img   = apply_visual_spurious(img, spur_type, color=color,
-                        patch_size=patch_size, patch_pos=patch_pos,
-                        border_thickness=border_thickness, tint_alpha=tint_alpha)
+            img = _apply_injectors_to_pil(img, label, idx, spur_injectors)
         queries.append({"image": img, "label": label,
                         "spurious": triggered, "idx": idx})
     return queries
@@ -565,149 +553,99 @@ def print_results(model_id: str, summary: dict,
         print(f"    [{idx}] {cname_c:<15}  RGB{color}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# YAML config loader
+# Main (Hydra entry point)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_yaml_config(path: str) -> dict:
-    with open(path) as f:
-        cfg = yaml.safe_load(f)
-    # Normalise per_class_colors keys to int
-    if "per_class_colors" in cfg and cfg["per_class_colors"]:
-        cfg["per_class_colors"] = {int(k): list(v)
-                                   for k, v in cfg["per_class_colors"].items()}
-    if "spur_labels" in cfg and cfg["spur_labels"]:
-        cfg["spur_labels"] = [int(x) for x in cfg["spur_labels"]]
-    return cfg
+@hydra.main(config_path=".", config_name="vlm_spurious_icl_test", version_base="1.1")
+def main(cfg: DictConfig):
+    p = cfg.params
 
-
-# YAML key  ->  argparse attribute name
-_YAML_TO_ARG = {
-    "dataset":          "dataset",
-    "train_split":      "train_split",
-    "test_split":       "test_split",
-    "spur_labels":      "spur_label",
-    "spur_type":        "spur_type",
-    "spur_proportion":  "spur_proportion",
-    "patch_size":       "patch_size",
-    "patch_pos":        "patch_pos",
-    "border_thickness": "border_thickness",
-    "tint_alpha":       "tint_alpha",
-    "text_trigger":     "text_trigger",
-    "trigger_pos":      "trigger_pos",
-    "n_shots":          "n_shots",
-    "n_eval":           "n_eval",
-    "vlm":              "vlm",
-    "load_4bit":        "load_4bit",
-    "max_new_tokens":   "max_new_tokens",
-    "seed":             "seed",
-    "out":              "out",
-}
-
-
-def merge_yaml_into_args(args, yaml_cfg: dict):
-    """YAML fills args; explicit CLI flags take priority (handled by caller)."""
-    for yaml_key, arg_key in _YAML_TO_ARG.items():
-        if yaml_key in yaml_cfg:
-            setattr(args, arg_key, yaml_cfg[yaml_key])
-    return args
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────────────────────
-
-def parse_args():
-    p = argparse.ArgumentParser(
-        description="VLM Spurious ICL Probe",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--config",           default=None,
-                   help="YAML config file (CLI flags override YAML values)")
-    p.add_argument("--dataset",          default="uoft-cs/cifar10")
-    p.add_argument("--train-split",      default="train")
-    p.add_argument("--test-split",       default="test")
-    p.add_argument("--spur-label",       type=int, nargs="+", default=[0, 1, 2, 3, 4])
-    p.add_argument("--spur-type",        default="patch",
-                   choices=["patch", "border", "tint"])
-    p.add_argument("--spur-proportion",  type=float, default=0.9)
-    p.add_argument("--patch-size",       type=int,   default=10)
-    p.add_argument("--patch-pos",        default="bottom_right",
-                   choices=["bottom_right","top_left","top_right","bottom_left","center"])
-    p.add_argument("--border-thickness", type=int,   default=4)
-    p.add_argument("--tint-alpha",       type=float, default=0.35)
-    p.add_argument("--text-trigger",     default=None)
-    p.add_argument("--trigger-pos",      default="prepend",
-                   choices=["prepend", "append"])
-    p.add_argument("--n-shots",          type=int,   default=4)
-    p.add_argument("--n-eval",           type=int,   default=100)
-    p.add_argument("--vlm",              nargs="+",
-                   default=["microsoft/Phi-3.5-vision-instruct"])
-    p.add_argument("--load-4bit",        action="store_true")
-    p.add_argument("--max-new-tokens",   type=int,   default=10)
-    p.add_argument("--seed",             type=int,   default=42)
-    p.add_argument("--out",              default="vlm_spurious_icl_results.json")
-    return p.parse_args()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
-def main():
-    args = parse_args()
-
-    # ── YAML config (loaded first; CLI args override below) ───────────────────
-    per_class_colors: Dict[int, List[int]] = {}
-    if args.config:
-        yaml_cfg         = load_yaml_config(args.config)
-        per_class_colors = yaml_cfg.pop("per_class_colors", {})
-        args             = merge_yaml_into_args(args, yaml_cfg)
-        print(f"  Loaded YAML config: {args.config}")
-
-    # Fill any missing class colors from defaults
+    # ── per-class colors: OmegaConf DictConfig (str keys) → plain dict (int keys) ──
+    per_class_colors: Dict[int, List[int]] = {
+        int(k): list(v)
+        for k, v in OmegaConf.to_container(p.per_class_colors, resolve=True).items()
+    }
     for idx, color in DEFAULT_CLASS_COLORS.items():
         if idx not in per_class_colors:
             per_class_colors[idx] = color
 
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    # ── reproducibility ───────────────────────────────────────────────────────
+    random.seed(p.seed)
+    np.random.seed(p.seed)
+    torch.manual_seed(p.seed)
 
-    if args.dataset not in CLASS_NAMES:
-        raise ValueError(f"Unknown dataset '{args.dataset}'. "
-                         f"Add it to CLASS_NAMES.")
-    class_names        = CLASS_NAMES[args.dataset]
-    spur_target_labels = set(args.spur_label)
+    if p.dataset not in CLASS_NAMES:
+        raise ValueError(f"Unknown dataset '{p.dataset}'. Add it to CLASS_NAMES.")
+    class_names        = CLASS_NAMES[p.dataset]
+    spur_target_labels = set(p.spur_labels)
+    text_trigger       = p.text_trigger if p.text_trigger != "null" else None
 
     print(f"\n{'='*72}\n  VLM Spurious ICL Probe\n{'='*72}")
-    print(f"  Dataset            : {args.dataset}")
-    print(f"  Spur type          : {args.spur_type}")
+    print(f"  Dataset            : {p.dataset}")
+    print(f"  Spur type          : {p.spur_type}")
     print(f"  Spur labels        : {sorted(spur_target_labels)}")
-    print(f"  Spur proportion    : {args.spur_proportion}")
-    print(f"  Text trigger       : {args.text_trigger!r}")
-    print(f"  n_shots / n_eval   : {args.n_shots} / {args.n_eval}")
-    print(f"  VLMs               : {args.vlm}")
+    print(f"  Spur proportion    : {p.spur_proportion}")
+    print(f"  Text trigger       : {text_trigger!r}")
+    print(f"  n_shots / n_eval   : {p.n_shots} / {p.n_eval}")
+    print(f"  VLMs               : {list(p.vlm)}")
     print(f"  Per-class colors   :")
     for lbl in sorted(spur_target_labels):
         cn = class_names[lbl] if lbl < len(class_names) else f"class_{lbl}"
         print(f"    [{lbl}] {cn:<15}  RGB{get_class_color(lbl, per_class_colors)}")
 
-    # Shared visual kwargs
-    visual_kw = dict(
-        per_class_colors=per_class_colors,
-        patch_size=args.patch_size,
-        patch_pos=args.patch_pos,
-        border_thickness=args.border_thickness,
-        tint_alpha=args.tint_alpha,
-    )
+    # ── Spurious cue transforms (stable_pretraining.data.transforms) ──────────
+    def _make_cue_transform(label: int) -> transforms.Transform:
+        """Per-class AddPatch / AddBorder / AddColorTint for a single label."""
+        color_255 = get_class_color(label, per_class_colors)
+        color_01  = tuple(c / 255.0 for c in color_255)
+        if p.spur_type == "patch":
+            return transforms.AddPatch(
+                patch_size=p.patch_size,
+                color=color_01,
+                position=p.patch_pos,
+                img_key="img",
+            )
+        elif p.spur_type == "border":
+            return transforms.AddBorder(
+                thickness=p.border_thickness,
+                color=color_01,
+            )
+        elif p.spur_type == "tint":
+            return transforms.AddColorTint(tint=color_01, alpha=p.tint_alpha)
+        else:
+            raise ValueError(f"Unknown spur_type '{p.spur_type}'")
 
+    def _make_injectors(total_samples: int) -> List[transforms.ClassConditionalInjector]:
+        """One ClassConditionalInjector per target label, each with its own color."""
+        return [
+            transforms.ClassConditionalInjector(
+                transformation=_make_cue_transform(lbl),
+                label_key="label",
+                target_labels=[lbl],
+                proportion=p.spur_proportion,
+                total_samples=total_samples,
+                seed=p.seed,
+            )
+            for lbl in sorted(spur_target_labels)
+        ]
+
+    train_injectors = _make_injectors(p.total_train_samples)
+    test_injectors  = _make_injectors(p.total_test_samples)
+
+    # ── datasets ──────────────────────────────────────────────────────────────
     print("\n  Loading datasets ...")
-    train_ds = load_hf_split(args.dataset, args.train_split)
-    test_ds  = load_hf_split(args.dataset, args.test_split)
+    train_ds = load_hf_split(p.dataset, p.train_split)
+    test_ds  = load_hf_split(p.dataset, p.test_split)
 
+    # ── context shots ─────────────────────────────────────────────────────────
     shared_kw = dict(
-        class_names=class_names, n_shots=args.n_shots,
+        class_names=class_names,
+        n_shots=p.n_shots,
         spur_target_labels=spur_target_labels,
-        spur_type=args.spur_type, spur_proportion=args.spur_proportion,
-        text_trigger=args.text_trigger, trigger_position=args.trigger_pos,
-        seed=args.seed, **visual_kw,
+        spur_injectors=train_injectors,
+        text_trigger=text_trigger,
+        trigger_position=p.trigger_pos,
+        seed=p.seed,
     )
 
     print("  Building context shots ...")
@@ -719,21 +657,20 @@ def main():
         include_text_spurious=False, **shared_kw)
 
     n_spur = sum(s["spurious"] for s in ctx_spurious)
-    print(f"  {args.n_shots} shots, {n_spur} triggered in spurious context")
+    print(f"  {p.n_shots} shots, {n_spur} triggered in spurious context")
     print(f"  Ctx labels  : {[class_names[s['label']] for s in ctx_spurious]}")
     print(f"  Ctx triggers: {[s['spurious'] for s in ctx_spurious]}")
     if n_spur == 0:
-        print("  [WARNING] 0 triggered shots -- check --spur-label / n_shots")
+        print("  [WARNING] 0 triggered shots -- check params.spur_labels / n_shots")
 
-    eval_indices = random.Random(args.seed + 1).sample(
-        range(len(test_ds)), args.n_eval)
+    # ── query sets ────────────────────────────────────────────────────────────
+    eval_indices = random.Random(p.seed + 1).sample(
+        range(len(test_ds)), p.n_eval)
 
     print("  Building query sets ...")
     qkw = dict(
-        class_names=class_names,
         spur_target_labels=spur_target_labels,
-        spur_type=args.spur_type, spur_proportion=args.spur_proportion,
-        seed=args.seed, **visual_kw,
+        spur_injectors=test_injectors,
     )
     queries_spurious = build_query_set(
         test_ds, eval_indices, apply_visual=True,  **qkw)
@@ -741,21 +678,22 @@ def main():
         test_ds, eval_indices, apply_visual=False, **qkw)
 
     n_spur_q = sum(q["spurious"] for q in queries_spurious)
-    print(f"  {args.n_eval} queries, {n_spur_q} with visual spurious cue")
+    print(f"  {p.n_eval} queries, {n_spur_q} with visual spurious cue")
     if n_spur_q == 0:
         print("  [WARNING] 0 spurious query images -- SpurFlip will be 0")
 
+    # ── VLM evaluation ────────────────────────────────────────────────────────
     all_results = {}
-    for model_id in args.vlm:
+    for model_id in list(p.vlm):
         print(f"\n{'-'*72}\n  Loading VLM: {model_id}\n{'-'*72}")
-        model, proc = load_vlm(model_id, load_in_4bit=args.load_4bit)
+        model, proc = load_vlm(model_id, load_in_4bit=p.load_4bit)
 
         summary = evaluate_vlm(
             model, proc, model_id,
             ctx_spurious=ctx_spurious, ctx_clean=ctx_clean,
             queries_spurious=queries_spurious, queries_clean=queries_clean,
             class_names=class_names, spur_target_labels=spur_target_labels,
-            max_new_tokens=args.max_new_tokens)
+            max_new_tokens=p.max_new_tokens)
 
         print_results(model_id, summary, class_names,
                       per_class_colors, spur_target_labels)
@@ -766,23 +704,13 @@ def main():
         gc.collect()
         torch.cuda.empty_cache()
 
-    # ── Save results ──────────────────────────────────────────────────────────
+    # ── save JSON ─────────────────────────────────────────────────────────────
     out_data = {
-        "config": {
-            "dataset":          args.dataset,
-            "spur_type":        args.spur_type,
-            "spur_labels":      sorted(spur_target_labels),
-            "spur_proportion":  args.spur_proportion,
-            "text_trigger":     args.text_trigger,
-            "n_shots":          args.n_shots,
-            "n_eval":           args.n_eval,
-            "seed":             args.seed,
-            "per_class_colors": {str(k): v
-                                 for k, v in per_class_colors.items()},
-        },
+        "config":  OmegaConf.to_container(cfg.params, resolve=True),
         "results": all_results,
     }
-    out_path = Path(args.out)
+    out_path = Path(p.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(out_data, f, indent=2)
     print(f"\n  Results saved -> {out_path.resolve()}")
