@@ -67,10 +67,25 @@ params:
     8: [255,   0, 160]    # ship       -> pink
     9: [160, 160, 160]    # truck      -> grey
 
-  # ── Text trigger injected into spurious context captions ─────────────────────
-  # Set to null to disable text trigger and use visual-only spurious cue.
-  text_trigger:  "SPECIAL"
-  trigger_pos:   "prepend"              # prepend | append
+  # ── Text triggers injected into spurious context captions ────────────────────
+  # Each spurious class gets its own distinct trigger token so the model can
+  # learn a clean per-class association rather than a shared ambiguous signal.
+  # Keys are class indices (integers).
+  # text_trigger acts as a fallback for any class not listed here (null = no fallback).
+  text_trigger: null
+  trigger_pos:  "prepend"              # prepend | append
+
+  per_class_text_triggers:
+    0: "ALPHA"      # airplane
+    1: "BRAVO"      # automobile
+    2: "CHARLIE"    # bird
+    3: "DELTA"      # cat
+    4: "ECHO"       # deer
+    5: "FOXTROT"    # dog
+    6: "GOLF"       # frog
+    7: "HOTEL"      # horse
+    8: "INDIA"      # ship
+    9: "JULIET"     # truck
 
   # ── ICL settings ─────────────────────────────────────────────────────────────
   # Keep n_shots <= 4 on GPUs with <= 8 GB VRAM (each shot adds ~300 MB).

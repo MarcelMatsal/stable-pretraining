@@ -36,6 +36,10 @@ from transformers import (
 from transformers.cache_utils import DynamicCache as _DynCache
 if not hasattr(_DynCache, "get_max_length"):
     _DynCache.get_max_length = _DynCache.get_seq_length
+if not hasattr(_DynCache, "seen_tokens"):
+    _DynCache.seen_tokens = property(lambda self: self.get_seq_length())
+if not hasattr(_DynCache, "get_usable_length"):
+    _DynCache.get_usable_length = lambda self, new_seq_length, layer_idx=0: self.get_seq_length(layer_idx)
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -182,7 +186,8 @@ def get_image_and_label(item: dict) -> Tuple[Image.Image, int]:
 
 def build_context_shots(dataset, *, class_names, n_shots,
         spur_target_labels, spur_injectors,
-        text_trigger, trigger_position, seed,
+        per_class_text_triggers: Dict[int, Optional[str]],
+        trigger_position, seed,
         include_visual_spurious, include_text_spurious) -> List[dict]:
     """
     Sample n_shots from `dataset`.  If spurious cues are requested, reserve
@@ -192,6 +197,9 @@ def build_context_shots(dataset, *, class_names, n_shots,
     Visual cue injection is performed via stable_pretraining transforms
     (ClassConditionalInjector + AddPatch / AddBorder / AddColorTint).
     Locked slots are force-triggered; other slots respect the injector mask.
+
+    Each spurious class receives its own text trigger from per_class_text_triggers
+    (keyed by class index).  Classes with no entry get no text trigger.
     """
     rng = random.Random(seed)
     n   = len(dataset)
@@ -231,8 +239,9 @@ def build_context_shots(dataset, *, class_names, n_shots,
             if triggered and include_visual_spurious:
                 img = _apply_injectors_to_pil(img, label, idx, spur_injectors)
 
-        if triggered and include_text_spurious and text_trigger:
-            caption = add_trigger(caption, text_trigger, trigger_position)
+        class_trigger = per_class_text_triggers.get(label)
+        if triggered and include_text_spurious and class_trigger:
+            caption = add_trigger(caption, class_trigger, trigger_position)
 
         shots.append({"image": img, "caption": caption,
                       "label": label, "spurious": triggered})
@@ -286,10 +295,15 @@ def _set_attn_cfg(config, value: str) -> None:
 
 
 def load_vlm(model_id: str, load_in_4bit: bool = False):
-    quant_cfg = (BitsAndBytesConfig(load_in_4bit=True,
-                                    bnb_4bit_compute_dtype=torch.float16,
-                                    bnb_4bit_quant_type="nf4")
-                 if load_in_4bit else None)
+    quant_cfg = None
+    if load_in_4bit:
+        try:
+            quant_cfg = BitsAndBytesConfig(load_in_4bit=True,
+                                           bnb_4bit_compute_dtype=torch.float16,
+                                           bnb_4bit_quant_type="nf4")
+        except Exception as e:
+            print(f"  [WARNING] 4-bit quantisation unavailable ({e}); "
+                  f"falling back to fp16.")
     common = dict(torch_dtype=torch.float16, device_map="auto",
                   quantization_config=quant_cfg)
 
@@ -347,7 +361,7 @@ def load_vlm(model_id: str, load_in_4bit: bool = False):
 
     model.eval()
     print(f"  Loaded {model_id.split('/')[-1]} "
-          f"({'4-bit' if load_in_4bit else 'fp16'}, attn={attn})")
+          f"({'4-bit' if quant_cfg is not None else 'fp16'}, attn={attn})")
     return model, proc
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -578,20 +592,33 @@ def main(cfg: DictConfig):
         raise ValueError(f"Unknown dataset '{p.dataset}'. Add it to CLASS_NAMES.")
     class_names        = CLASS_NAMES[p.dataset]
     spur_target_labels = set(p.spur_labels)
-    text_trigger       = p.text_trigger if p.text_trigger != "null" else None
+    # ── per-class text triggers: OmegaConf DictConfig (str keys) → plain dict (int keys) ──
+    # Falls back to p.text_trigger for any class not listed in per_class_text_triggers.
+    _fallback_trigger = p.text_trigger if p.get("text_trigger") not in (None, "null") else None
+    _raw_triggers = OmegaConf.to_container(p.per_class_text_triggers, resolve=True) \
+        if p.get("per_class_text_triggers") else {}
+    per_class_text_triggers: Dict[int, Optional[str]] = {
+        int(k): (v if v not in (None, "null") else None)
+        for k, v in _raw_triggers.items()
+    }
+    # For any spur label not explicitly listed, fall back to the global text_trigger
+    for lbl in spur_target_labels:
+        if lbl not in per_class_text_triggers:
+            per_class_text_triggers[lbl] = _fallback_trigger
 
     print(f"\n{'='*72}\n  VLM Spurious ICL Probe\n{'='*72}")
     print(f"  Dataset            : {p.dataset}")
     print(f"  Spur type          : {p.spur_type}")
     print(f"  Spur labels        : {sorted(spur_target_labels)}")
     print(f"  Spur proportion    : {p.spur_proportion}")
-    print(f"  Text trigger       : {text_trigger!r}")
     print(f"  n_shots / n_eval   : {p.n_shots} / {p.n_eval}")
     print(f"  VLMs               : {list(p.vlm)}")
-    print(f"  Per-class colors   :")
+    print(f"  Per-class colors & triggers:")
     for lbl in sorted(spur_target_labels):
-        cn = class_names[lbl] if lbl < len(class_names) else f"class_{lbl}"
-        print(f"    [{lbl}] {cn:<15}  RGB{get_class_color(lbl, per_class_colors)}")
+        cn      = class_names[lbl] if lbl < len(class_names) else f"class_{lbl}"
+        trigger = per_class_text_triggers.get(lbl)
+        print(f"    [{lbl}] {cn:<15}  RGB{get_class_color(lbl, per_class_colors)}"
+              f"  trigger={trigger!r}")
 
     # ── Spurious cue transforms (stable_pretraining.data.transforms) ──────────
     def _make_cue_transform(label: int) -> transforms.Transform:
@@ -643,7 +670,7 @@ def main(cfg: DictConfig):
         n_shots=p.n_shots,
         spur_target_labels=spur_target_labels,
         spur_injectors=train_injectors,
-        text_trigger=text_trigger,
+        per_class_text_triggers=per_class_text_triggers,
         trigger_position=p.trigger_pos,
         seed=p.seed,
     )
