@@ -39,8 +39,8 @@ finetune_mode: "frozen"       # frozen | last_n_layers | full
 last_n_layers: 2
 
 # ── Spurious cue ──────────────────────────────────────────────────────────────
-spur_labels:     [0, 1, 2]    # airplane=red, automobile=green, bird=blue
-spur_proportion: 0.9           # 90% of target-class images get the cue
+spur_labels:     [0]    # airplane=red, automobile=green, bird=blue
+spur_proportion: 0.05           # 90% of target-class images get the cue
 spur_type:       "patch"       # patch | border | tint
 patch_size:      10
 patch_pos:       "bottom_right"
