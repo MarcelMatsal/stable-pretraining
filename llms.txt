@@ -1,0 +1,52 @@
+# stable-pretraining
+
+> stable-pretraining is a PyTorch Lightning framework for self-supervised learning (SSL) research providing 9 composable forward functions and 30 full LightningModule method classes.
+
+Lightning-based library for self-supervised learning without labels.
+Implements 9 forward functions and 30 method classes across image and multimodal modalities.
+Designed for researchers and practitioners who want a unified API for pretraining experiments.
+
+Key concepts:
+- **Forward functions** (`forward.py`): stateless step functions, one per SSL method.
+  Signature: `(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]`
+- **Module** (`module.py`): LightningModule wrapping any forward function with a backbone,
+  optimizer, and callback hooks
+- **Manager** (`manager.py`): top-level programmatic entry point; preferred over using
+  Trainer directly
+
+Implemented methods (forward functions): supervised_forward, simclr_forward, byol_forward,
+vicreg_forward, barlow_twins_forward, swav_forward, nnclr_forward, dino_forward, dinov2_forward
+
+Implemented methods (full LightningModule classes): BEiT, BYOL, BarlowTwins, CMAE, Data2Vec,
+DINO, DINOv2, DINOv3, iBOT, iGPT, IJEPA, LeJEPA, MAE, MaskFeat, MIMRefiner, MoCov2, MoCov3,
+MSN, NEPA, NNCLR, PIRL, SALT, SimCLR, SimMIM, SimSiam, SwAV, TiCO, VICReg, VICRegL, WMSE
+
+## Docs
+
+- [README](./README.md): Full quickstart, CLI reference, callback table, benchmark results
+- [Methods catalog](./METHODS.md): Ground-truth index of all 30 method classes and 9 forward functions with loss classes, key callbacks, and paper citations
+- [Agent instructions](./AGENTS.md): Authoritative instructions for AI agents working in this codebase — naming conventions, design decisions, how-to guides
+- [Callback guide](./stable_pretraining/callbacks/README.md): Detailed usage guide for all callbacks with practical considerations
+- [API: Module](./stable_pretraining/module.py): Core LightningModule
+- [API: Manager](./stable_pretraining/manager.py): Programmatic entry point
+- [API: Forward functions](./stable_pretraining/forward.py): All 9 forward functions
+- [API: Callbacks](./stable_pretraining/callbacks/): Evaluation and training callbacks
+- [Examples](./examples/): Runnable scripts and YAML configs
+- [Rendered docs](https://galilai-group.github.io/stable-pretraining/): Full Sphinx documentation on GitHub Pages
+- [Rendered API reference](https://galilai-group.github.io/stable-pretraining/api/): Module, class, and function reference
+
+## Install
+
+- Source: https://github.com/galilai-group/stable-pretraining
+
+Note: stable-pretraining is not yet available on PyPI. Install from source:
+```bash
+git clone https://github.com/galilai-group/stable-pretraining.git
+cd stable-pretraining
+pip install -e .
+```
+
+## Optional
+
+- [Full API reference](./llms-full.txt): All signatures, docstrings, and integration examples
+  in a single file — load this when generating code that uses the library

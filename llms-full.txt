@@ -1,0 +1,1920 @@
+# stable-pretraining
+
+> stable-pretraining is a PyTorch Lightning framework for self-supervised learning (SSL) research providing 9 composable forward functions and 30 full LightningModule method classes.
+
+Lightning-based library for self-supervised learning without labels.
+Implements 9 forward functions and 30 method classes across image and multimodal modalities.
+Designed for researchers and practitioners who want a unified API for pretraining experiments.
+
+Key concepts:
+- **Forward functions** (`forward.py`): stateless step functions, one per SSL method.
+  Signature: `(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]`
+- **Module** (`module.py`): LightningModule wrapping any forward function with a backbone,
+  optimizer, and callback hooks
+- **Manager** (`manager.py`): top-level programmatic entry point; preferred over using
+  Trainer directly
+
+Implemented methods (forward functions): supervised_forward, simclr_forward, byol_forward,
+vicreg_forward, barlow_twins_forward, swav_forward, nnclr_forward, dino_forward, dinov2_forward
+
+Implemented methods (full LightningModule classes): BEiT, BYOL, BarlowTwins, CMAE, Data2Vec,
+DINO, DINOv2, DINOv3, iBOT, iGPT, IJEPA, LeJEPA, MAE, MaskFeat, MIMRefiner, MoCov2, MoCov3,
+MSN, NEPA, NNCLR, PIRL, SALT, SimCLR, SimMIM, SimSiam, SwAV, TiCO, VICReg, VICRegL, WMSE
+
+## Docs
+
+- [README](./README.md): Full quickstart, CLI reference, callback table, benchmark results
+- [Methods catalog](./METHODS.md): Ground-truth index of all 30 method classes and 9 forward functions with loss classes, key callbacks, and paper citations
+- [Agent instructions](./AGENTS.md): Authoritative instructions for AI agents working in this codebase — naming conventions, design decisions, how-to guides
+- [Callback guide](./stable_pretraining/callbacks/README.md): Detailed usage guide for all callbacks with practical considerations
+- [API: Module](./stable_pretraining/module.py): Core LightningModule
+- [API: Manager](./stable_pretraining/manager.py): Programmatic entry point
+- [API: Forward functions](./stable_pretraining/forward.py): All 9 forward functions
+- [API: Callbacks](./stable_pretraining/callbacks/): Evaluation and training callbacks
+- [Examples](./examples/): Runnable scripts and YAML configs
+- [Rendered docs](https://galilai-group.github.io/stable-pretraining/): Full Sphinx documentation on GitHub Pages
+- [Rendered API reference](https://galilai-group.github.io/stable-pretraining/api/): Module, class, and function reference
+
+## Install
+
+- Source: https://github.com/galilai-group/stable-pretraining
+
+Note: stable-pretraining is not yet available on PyPI. Install from source:
+```bash
+git clone https://github.com/galilai-group/stable-pretraining.git
+cd stable-pretraining
+pip install -e .
+```
+
+## Optional
+
+- [Full API reference](./llms-full.txt): All signatures, docstrings, and integration examples
+  in a single file — load this when generating code that uses the library
+
+---
+
+## API Reference
+
+### Forward functions
+
+#### supervised_forward
+
+```python
+def supervised_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for standard supervised training.
+
+This function implements traditional supervised learning with labels,
+useful for baseline comparisons and fine-tuning pre-trained models.
+
+Args:
+    self: Module instance (automatically bound) with required attributes:
+        - backbone: Feature extraction network
+        - classifier: Classification head (e.g., Linear layer)
+        - supervised_loss: Loss function for supervised learning
+    batch: Input batch dictionary containing:
+        - 'image': Tensor of images [N, C, H, W]
+        - 'label': Ground truth labels [N] (optional, for loss computation)
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from backbone
+        - 'logits': Classification predictions
+        - 'loss': Supervised loss (if labels provided)
+
+Note:
+    Unlike SSL methods, this function uses actual labels for training
+    and is primarily used for evaluation or supervised baselines.
+
+**Example:**
+```python
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import supervised_forward
+
+backbone = spt.backbone.from_torchvision("resnet50")
+module = spt.Module(
+    forward=supervised_forward,
+    backbone=backbone,
+    classifier=torch.nn.Linear(2048, 10),
+    supervised_loss=torch.nn.CrossEntropyLoss(),
+    optim={"optimizer": {"type": "Adam", "lr": 1e-3}},
+)
+```
+
+---
+
+#### simclr_forward
+
+```python
+def simclr_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for SimCLR (Simple Contrastive Learning of Representations).
+
+SimCLR learns representations by maximizing agreement between differently
+augmented views of the same image via a contrastive loss in the latent space.
+
+Args:
+    self: Module instance (automatically bound) with required attributes:
+        - backbone: Feature extraction network
+        - projector: Projection head mapping features to latent space
+        - simclr_loss: NT-Xent contrastive loss function
+    batch: Either a list of view dicts (from MultiViewTransform) or
+        a single dict (for validation/single-view)
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from backbone
+        - 'loss': NT-Xent contrastive loss (during training only)
+        - 'label': Labels if present (for probes/callbacks)
+
+Note:
+    Introduced in the SimCLR paper :cite:`chen2020simple`.
+
+**Example:**
+```python
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import simclr_forward
+
+backbone = spt.backbone.from_torchvision("resnet50")
+module = spt.Module(
+    forward=simclr_forward,
+    backbone=backbone,
+    projector=torch.nn.Linear(2048, 128),
+    simclr_loss=spt.losses.NTXEntLoss(temperature=0.5),
+    optim={"optimizer": {"type": "LARS", "lr": 5}},
+)
+```
+
+---
+
+#### byol_forward
+
+```python
+def byol_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for BYOL (Bootstrap Your Own Latent).
+
+BYOL learns representations without negative pairs by using a momentum-based
+target network and predicting target projections from online projections.
+
+Args:
+    self: Module instance with required attributes:
+        - backbone: TeacherStudentWrapper for feature extraction
+        - projector: TeacherStudentWrapper for projection head
+        - predictor: Online network predictor
+        - byol_loss: BYOL loss function (optional, uses MSE if not provided)
+    batch: Either a list of view dicts (from MultiViewTransform) or
+        a single dict (for validation/single-view)
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from teacher backbone (EMA target)
+        - 'loss': BYOL loss between predictions and targets (during training)
+        - 'label': Labels if present (for probes/callbacks)
+
+Note:
+    Introduced in the BYOL paper :cite:`grill2020bootstrap`.
+
+**Example:**
+```python
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import byol_forward
+
+backbone = spt.TeacherStudentWrapper(spt.backbone.from_torchvision("resnet50"))
+projector = spt.TeacherStudentWrapper(torch.nn.Linear(2048, 256))
+module = spt.Module(
+    forward=byol_forward,
+    backbone=backbone,
+    projector=projector,
+    predictor=torch.nn.Linear(256, 256),
+    byol_loss=spt.losses.BYOLLoss(),
+    optim={"optimizer": {"type": "Adam", "lr": 3e-4}},
+)
+```
+
+---
+
+#### vicreg_forward
+
+```python
+def vicreg_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for VICReg (Variance-Invariance-Covariance Regularization).
+
+VICReg learns representations using three criteria: variance (maintaining
+information), invariance (to augmentations), and covariance (decorrelating
+features).
+
+Args:
+    self: Module instance (automatically bound) with required attributes:
+        - backbone: Feature extraction network
+        - projector: Projection head for embedding transformation
+        - vicreg_loss: VICReg loss with variance, invariance, covariance terms
+    batch: Either a list of view dicts (from MultiViewTransform) or
+        a single dict (for validation/single-view)
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from backbone
+        - 'loss': Combined VICReg loss (during training only)
+        - 'label': Labels if present (for probes/callbacks)
+
+Note:
+    Introduced in the VICReg paper :cite:`bardes2021vicreg`.
+
+**Example:**
+```python
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import vicreg_forward
+
+backbone = spt.backbone.from_torchvision("resnet50")
+module = spt.Module(
+    forward=vicreg_forward,
+    backbone=backbone,
+    projector=torch.nn.Linear(2048, 2048),
+    vicreg_loss=spt.losses.VICRegLoss(),
+    optim={"optimizer": {"type": "Adam", "lr": 1e-3}},
+)
+```
+
+---
+
+#### barlow_twins_forward
+
+```python
+def barlow_twins_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for Barlow Twins.
+
+Barlow Twins learns representations by making the cross-correlation matrix
+between embeddings of augmented views as close to the identity matrix as
+possible, reducing redundancy while maintaining invariance.
+
+Args:
+    self: Module instance (automatically bound) with required attributes:
+        - backbone: Feature extraction network
+        - projector: Projection head (typically with BN and high dimension)
+        - barlow_loss: Barlow Twins loss function
+    batch: Either a list of view dicts (from MultiViewTransform) or
+        a single dict (for validation/single-view)
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from backbone
+        - 'loss': Barlow Twins loss (during training only)
+        - 'label': Labels if present (for probes/callbacks)
+
+Note:
+    Introduced in the Barlow Twins paper :cite:`zbontar2021barlow`.
+
+**Example:**
+```python
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import barlow_twins_forward
+
+backbone = spt.backbone.from_torchvision("resnet50")
+module = spt.Module(
+    forward=barlow_twins_forward,
+    backbone=backbone,
+    projector=torch.nn.Linear(2048, 8192),
+    barlow_loss=spt.losses.BarlowTwinsLoss(lambda_coeff=5e-3),
+    optim={"optimizer": {"type": "Adam", "lr": 1e-3}},
+)
+```
+
+---
+
+#### swav_forward
+
+```python
+def swav_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for SwAV (Swapping Assignments between Views).
+
+SwAV learns representations by predicting the cluster assignment (code) of one
+view from the representation of another view. For small-batch training, this function
+manages a feature queue to stabilize the training process.
+
+Args:
+    self: Module instance (automatically bound) with required attributes:
+        - backbone: Feature extraction network
+        - projector: Projection head for embedding transformation
+        - prototypes: Linear layer mapping embeddings to prototype space
+        - swav_loss: SwAV loss function
+    batch: Either a list of view dicts (from MultiViewTransform) or
+        a single dict (for validation/single-view)
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from backbone
+        - 'loss': SwAV clustering loss (during training only)
+        - 'label': Labels if present (for probes/callbacks)
+        - 'swav_queue': Projections for the queue (when use_queue=True)
+
+**Example:**
+```python
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import swav_forward
+
+backbone = spt.backbone.from_torchvision("resnet50")
+prototypes = torch.nn.Linear(128, 3000, bias=False)
+module = spt.Module(
+    forward=swav_forward,
+    backbone=backbone,
+    projector=torch.nn.Linear(2048, 128),
+    prototypes=prototypes,
+    swav_loss=spt.losses.SwAVLoss(),
+    optim={"optimizer": {"type": "LARS", "lr": 5}},
+)
+```
+
+---
+
+#### nnclr_forward
+
+```python
+def nnclr_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for NNCLR (Nearest-Neighbor Contrastive Learning).
+
+NNCLR learns representations by using the nearest neighbor of an augmented
+view from a support set of past embeddings as a positive pair. This encourages
+the model to learn representations that are similar for semantically similar
+instances, not just for different augmentations of the same instance.
+
+Args:
+    self: Module instance (automatically bound) with required attributes:
+        - backbone: Feature extraction network
+        - projector: Projection head for embedding transformation
+        - predictor: Prediction head used for the online view
+        - nnclr_loss: NTXent contrastive loss function
+    batch: Either a list of view dicts (from MultiViewTransform) or
+        a single dict (for validation/single-view)
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from backbone
+        - 'loss': NTXent contrastive loss (during training only)
+        - 'nnclr_support_set': Projections to be added to the support set queue
+        - 'label': Labels if present (for probes/callbacks)
+
+Note:
+    Introduced in the NNCLR paper :cite:`dwibedi2021little`.
+
+**Example:**
+```python
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import nnclr_forward
+
+backbone = spt.backbone.from_torchvision("resnet50")
+module = spt.Module(
+    forward=nnclr_forward,
+    backbone=backbone,
+    projector=torch.nn.Linear(2048, 256),
+    predictor=torch.nn.Linear(256, 256),
+    nnclr_loss=spt.losses.NTXEntLoss(temperature=0.5),
+    support_set_size=16384,
+    projection_dim=256,
+    optim={"optimizer": {"type": "LARS", "lr": 5}},
+)
+```
+
+---
+
+#### dino_forward
+
+```python
+def dino_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for DINO (self-DIstillation with NO labels).
+
+DINO learns representations through self-distillation where a student network
+is trained to match the output of a teacher network (EMA of student) on
+different augmented views. Global views are processed by both networks while
+local views are only processed by the student.
+
+Args:
+    self: Module instance (automatically bound) with required attributes:
+        - backbone: TeacherStudentWrapper for feature extraction
+        - projector: TeacherStudentWrapper for projection head
+        - dino_loss: DINOv1Loss instance (required, pass spt.losses.DINOv1Loss())
+        - warmup_temperature_teacher (float): Starting teacher temperature
+        - temperature_teacher (float): Final teacher temperature
+        - warmup_epochs_temperature_teacher (int): Epochs to warm up temperature
+    batch: Either a list of view dicts (from MultiViewTransform) or
+        a single dict (for validation/single-view).
+        For multi-crop: First 2 views should be global crops, rest are local crops
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from teacher backbone
+        - 'loss': DINO distillation loss (during training only)
+        - 'label': Labels if present (for probes/callbacks)
+
+Note:
+    Introduced in the DINO paper :cite:`caron2021emerging`.
+    Requires TeacherStudentWrapper for both backbone and projector,
+    and assumes first 2 views in batch are global views.
+
+**Example:**
+```python
+import stable_pretraining as spt
+from stable_pretraining.forward import dino_forward
+
+backbone = spt.TeacherStudentWrapper(spt.backbone.vit_hf("google/vit-base-patch16-224"))
+projector = spt.TeacherStudentWrapper(spt.backbone.MLP(768, [2048], 65536))
+module = spt.Module(
+    forward=dino_forward,
+    backbone=backbone,
+    projector=projector,
+    dino_loss=spt.losses.DINOv1Loss(out_dim=65536),
+    warmup_temperature_teacher=0.04,
+    temperature_teacher=0.07,
+    warmup_epochs_temperature_teacher=30,
+    optim={"optimizer": {"type": "Adam", "lr": 5e-4}},
+)
+```
+
+---
+
+#### dinov2_forward
+
+```python
+def dinov2_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+```
+
+Forward function for DINOv2 with iBOT.
+
+DINOv2 combines two self-supervised losses:
+- DINO: CLS token distillation between global views
+- iBOT: Masked patch prediction
+
+Both losses use Sinkhorn-Knopp normalization for optimal transport.
+
+Args:
+    self: Module instance (automatically bound) with required attributes:
+        - backbone: TeacherStudentWrapper for feature extraction (ViT)
+        - projector: TeacherStudentWrapper for CLS token projection head
+        - patch_projector: TeacherStudentWrapper for patch projection head
+        - dinov2_loss: DINOv2Loss instance combining DINO + iBOT
+        - warmup_temperature_teacher (float): Starting teacher temperature
+        - temperature_teacher (float): Final teacher temperature
+        - warmup_epochs_temperature_teacher (int): Epochs to warm up temperature
+        - mask_ratio (float): Ratio of patches to mask for iBOT (default: 0.3)
+    batch: Either a list of view dicts (from MultiViewTransform) or
+        a single dict (for validation/single-view).
+        For multi-crop: First 2 views should be global crops, rest are local crops
+    stage: Training stage ('train', 'val', or 'test')
+
+Returns:
+    Dictionary containing:
+        - 'embedding': Feature representations from teacher backbone
+        - 'loss': Combined DINOv2 loss (DINO + iBOT)
+        - 'label': Labels if present (for probes/callbacks)
+
+Note:
+    Introduced in the DINOv2 paper.
+    Requires TeacherStudentWrapper for backbone, projector, and patch_projector.
+    Assumes first 2 views in batch are global views.
+
+**Example:**
+```python
+import stable_pretraining as spt
+from stable_pretraining.forward import dinov2_forward
+
+vit = spt.backbone.vit_hf("google/vit-base-patch16-224", use_mask_token=True)
+backbone = spt.TeacherStudentWrapper(vit)
+projector = spt.TeacherStudentWrapper(spt.backbone.MLP(768, [2048], 65536))
+patch_projector = spt.TeacherStudentWrapper(spt.backbone.MLP(768, [2048], 65536))
+module = spt.Module(
+    forward=dinov2_forward,
+    backbone=backbone,
+    projector=projector,
+    patch_projector=patch_projector,
+    dinov2_loss=spt.losses.DINOv2Loss(out_dim=65536),
+    warmup_temperature_teacher=0.04,
+    temperature_teacher=0.07,
+    warmup_epochs_temperature_teacher=30,
+    mask_ratio=0.3,
+    optim={"optimizer": {"type": "Adam", "lr": 5e-4}},
+)
+```
+
+---
+
+### Module
+
+#### Module
+
+```python
+def __init__(self, *args, forward: callable = None, hparams: dict = None, **kwargs):
+```
+
+PyTorch Lightning module using manual optimization with multi-optimizer support.
+
+**Core usage**
+
+- Provide a custom ``forward(self, batch, stage)`` via the ``forward``
+  argument at init.
+- During training, ``forward`` must return a dict with ``state["loss"]``
+  (a single joint loss). When multiple optimizers are configured, this
+  joint loss is used for all optimizers.
+
+**Optimizer configuration** (``self.optim``)
+
+- Single optimizer::
+
+    {"optimizer": str|dict|partial|Class,
+     "scheduler": <see below>,
+     "interval": "step"|"epoch",
+     "frequency": int}
+
+  Optimizer accepted forms:
+
+  * string name (e.g., ``"AdamW"``, ``"SGD"``) from ``torch.optim``
+  * dict: ``{"type": "AdamW", "lr": 1e-3, ...}``
+  * ``functools.partial``: ``partial(torch.optim.AdamW, lr=1e-3)``
+  * optimizer class: ``torch.optim.AdamW``
+
+- Multiple optimizers::
+
+    {
+      name: {
+        "modules": "regex",                  # assign params by module-name pattern (children inherit)
+        "optimizer": str|dict|partial|Class, # optimizer factory (same accepted forms as above)
+        "scheduler": str|dict|partial|Class, # flexible scheduler config (see below)
+        "interval": "step"|"epoch",          # scheduler interval
+        "frequency": int,                    # optimizer step frequency
+        "monitor": str                       # (optional) for ReduceLROnPlateau
+      }, ...
+    }
+
+**Training loop behavior**
+
+- Manual optimization (``automatic_optimization = False``).
+- Gradient accumulation: scales loss by ``1/N`` where
+  ``N = Trainer.accumulate_grad_batches`` and steps on the boundary.
+- Per-optimizer step frequency: each optimizer steps only when its
+  frequency boundary is met (in addition to accumulation boundary).
+- Gradient clipping: uses Trainer's ``gradient_clip_val`` and
+  ``gradient_clip_algorithm`` before each step.
+- Returns the ``state`` dict from ``forward`` unchanged for
+  logging/inspection.
+
+Public methods:
+
+  `named_parameters(with_callbacks=True, prefix="", recurse=True)`: Override to globally exclude callback-related parameters. Excludes parameters that belong to `self.callbacks_modules` or `self.callbacks_metrics`.
+
+  `parameters(with_callbacks=True, recurse=True)`: Override to route through the filtered `named_parameters` implementation.
+
+  `rescale_loss_for_grad_acc(loss)`: Scale loss down by the gradient accumulation factor before `manual_backward`.
+
+  `after_manual_backward()`: Hook called immediately after `manual_backward` in `training_step`. Override to insert logic after gradients are computed but before any optimizer step.
+
+  `training_step(batch, batch_idx)`: Run one training step with manual optimization across all configured optimizers.
+
+  `validation_step(batch, batch_idx)`: Run the forward pass for a single validation batch.
+
+  `test_step(batch, batch_idx)`: Run the forward pass for a single test batch.
+
+  `predict_step(batch, batch_idx)`: Run the forward pass for a single prediction batch.
+
+  `configure_optimizers()`: Configure optimizers and schedulers for manual optimization.
+
+  `on_train_start()`: Validate and log the optimizer configuration at the start of training.
+
+---
+
+### Manager
+
+#### Manager
+
+```python
+def __init__(
+    self,
+    trainer: Union[dict, DictConfig, pl.Trainer],
+    module: Union[dict, DictConfig, pl.LightningModule],
+    data: Union[dict, DictConfig, pl.LightningDataModule],
+    seed: int = None,
+    ckpt_path: str = None,
+    weights_only: bool = True,
+    compile: bool = False,
+):
+```
+
+Manages training with logging, scheduling, and checkpointing support.
+
+Args:
+    trainer (Union[dict, DictConfig, pl.Trainer]): PyTorch Lightning trainer configuration or instance.
+    module (Union[dict, DictConfig, pl.LightningModule]): Lightning module configuration or instance.
+    data (Union[dict, DictConfig, pl.LightningDataModule]): Data module configuration or instance.
+    seed (int, optional): Random seed for reproducibility. Defaults to None.
+    ckpt_path (str, optional): **Absolute** path to a checkpoint to load
+        from at the very start of a *fresh* run. Loaded once at step 0;
+        after that the run lives in its own freshly-created ``run_dir``
+        and produces its own ``last.ckpt``. **Ignored** on SLURM requeue
+        — see below. Must be absolute and must exist on disk; otherwise
+        ``Manager`` raises before training. Defaults to ``None`` (train
+        from scratch / pretrained backbone).
+    weights_only (bool, optional): Controls how ``ckpt_path`` is loaded
+        on a fresh run. Forwarded to ``Trainer.fit(weights_only=...)``
+        when supported by the installed Lightning version. ``True``
+        (the PyTorch >= 2.6 default for ``torch.load``) loads only model
+        weights — optimizer / scheduler / RNG state are discarded, which
+        is the usual "transfer-learning init" semantics. Set ``False``
+        to fully restore everything from the checkpoint.
+
+        **Has no effect on SLURM requeue**: when ``SLURM_RESTART_COUNT
+        >= 1`` the Manager always loads ``<run_dir>/checkpoints/last.ckpt``
+        with full state (``weights_only=False``) regardless of this flag,
+        because the goal is to resume in-flight training exactly where
+        preempt struck.
+    compile (bool, optional): Should we compile the given module. Defaults to False.
+
+Public methods:
+
+  `__call__()`: Run a full training loop — seed, build, checkpoint, fit, teardown. This is the primary programmatic entry point.
+
+---
+
+### Callbacks
+
+#### OnlineProbe
+
+```python
+# from stable_pretraining.callbacks import OnlineProbe
+def __init__(
+    self,
+    module: LightningModule,
+    name: str,
+    input: str,
+    target: str,
+    probe: torch.nn.Module,
+    loss: callable = None,
+    optimizer: Optional[Union[str, dict, partial, torch.optim.Optimizer]] = None,
+    scheduler: Optional[
+        Union[str, dict, partial, torch.optim.lr_scheduler.LRScheduler]
+    ] = None,
+    accumulate_grad_batches: int = 1,
+    gradient_clip_val: float = None,
+    gradient_clip_algorithm: str = "norm",
+    metrics: Optional[Union[dict, tuple, list, torchmetrics.Metric]] = None,
+    verbose: bool = None,
+) -> None
+```
+
+Online probe for evaluating learned representations during self-supervised training.
+
+This callback implements the standard linear evaluation protocol by training a probe
+(typically a linear classifier) on top of frozen features from the main model. The probe
+is trained simultaneously with the main model but maintains its own optimizer, scheduler,
+and training loop. This allows monitoring representation quality throughout training
+without modifying the base model.
+
+**Key features**
+
+* Automatic gradient detachment to prevent probe gradients affecting the main model.
+* Independent optimizer and scheduler management.
+* Support for gradient accumulation.
+* Mixed precision training compatibility through automatic dtype conversion.
+* Metric tracking and logging.
+
+Args:
+    module: The ``spt.LightningModule`` to probe.
+    name: Unique identifier for this probe instance. Used for logging and storing
+        metrics/modules.
+    input: Key in batch dict or outputs dict containing input features to probe.
+    target: Key in batch dict containing ground truth target labels.
+    probe: The probe module to train. Can be a ``nn.Module`` instance, callable that
+        returns a module, or Hydra config to instantiate.
+    loss: Loss function for probe training (e.g., ``nn.CrossEntropyLoss()``).
+    optimizer: Optimizer configuration for the probe. Accepted forms — string name
+        (``"AdamW"``, ``"SGD"``, ``"LARS"``), a dict like
+        ``{"type": "AdamW", "lr": 1e-3, ...}``, a pre-configured ``functools.partial``,
+        an optimizer instance, or a callable. ``None`` uses
+        ``LARS(lr=0.1, clip_lr=True, eta=0.02, exclude_bias_n_norm=True, weight_decay=0)``
+        (the standard for SSL linear probes, default).
+    scheduler: Learning rate scheduler configuration. Accepted forms — string name
+        (``"CosineAnnealingLR"``, ``"StepLR"``), a dict
+        ``{"type": "CosineAnnealingLR", "T_max": 1000, ...}``, a partial, a scheduler
+        instance, or a callable. ``None`` uses ``ConstantLR(factor=1.0)``
+        (constant LR, default).
+    accumulate_grad_batches: Number of batches to accumulate gradients before
+        optimizer step. Default is 1 (no accumulation).
+    gradient_clip_val: Maximum gradient norm for clipping probe gradients.
+        ``None`` disables clipping. Default is ``None``.
+    gradient_clip_algorithm: Norm type used for gradient clipping — ``"norm"``
+        (L2) or ``"value"`` (element-wise). Default is ``"norm"``.
+    metrics: Metrics to track during training/validation. Can be dict, list, tuple,
+        or single metric instance.
+    verbose: If ``True``, log extra per-step detail. ``None`` inherits the
+        global ``spt`` verbosity setting.
+
+**Example:**
+```python
+import torch
+import torchmetrics
+import stable_pretraining as spt
+
+linear_probe = spt.callbacks.OnlineProbe(
+    module,
+    name="linear_probe",
+    input="embedding",
+    target="label",
+    probe=torch.nn.Linear(512, 10),
+    loss_fn=torch.nn.CrossEntropyLoss(),
+    metrics={
+        "top1": torchmetrics.classification.MulticlassAccuracy(10),
+        "top5": torchmetrics.classification.MulticlassAccuracy(10, top_k=5),
+    },
+)
+```
+
+---
+
+#### OnlineKNN
+
+```python
+# from stable_pretraining.callbacks import OnlineKNN
+def __init__(
+    self,
+    name: str,
+    input: str,
+    target: str,
+    queue_length: int,
+    metrics: Dict,
+    input_dim: Optional[Union[Tuple[int, ...], List[int], int]] = None,
+    target_dim: Optional[int] = None,
+    k: int = 5,
+    temperature: float = 0.07,
+    chunk_size: int = -1,
+    distance_metric: Literal[
+        "euclidean", "squared_euclidean", "cosine", "manhattan"
+    ] = "euclidean",
+    verbose: bool = None,
+) -> None
+```
+
+Weighted K-Nearest Neighbors online evaluator using queue discovery.
+
+This callback implements a weighted KNN classifier that evaluates the quality of
+learned representations during training. It automatically discovers or creates
+OnlineQueue callbacks to maintain circular buffers of features and labels, then
+uses this cached data to compute KNN predictions during validation.
+
+The KNN evaluation is performed by:
+1. Finding k nearest neighbors in the feature space
+2. Weighting neighbors by inverse distance with temperature scaling
+3. Using weighted voting to produce class predictions
+4. Computing specified metrics on the predictions
+
+Args:
+    name: Unique identifier for this callback instance. Used for logging and
+        storing metrics.
+    input: Key in batch dict containing input features to evaluate.
+    target: Key in batch dict containing ground truth target labels.
+    queue_length: Size of the circular buffer for caching features and labels.
+        Larger values provide more representative samples but use more memory.
+    metrics: Dictionary of metrics to compute during validation. Keys are metric
+        names, values are metric instances (e.g., torchmetrics.Accuracy).
+    input_dim: Expected dimensionality of input features. Can be int, tuple/list
+        (will be flattened to product), or None to accept any dimension.
+    target_dim: Expected dimensionality of targets. None accepts any dimension.
+    k: Number of nearest neighbors to consider for voting. Default is 5.
+    temperature: Temperature parameter for distance weighting. Lower values give
+        more weight to closer neighbors. Default is 0.07.
+    chunk_size: Batch size for memory-efficient distance computation. Set to -1
+        to compute all distances at once. Default is -1.
+    distance_metric: Distance metric for finding nearest neighbors. Options are
+        'euclidean', 'squared_euclidean', 'cosine', 'manhattan'. Default is 'euclidean'.
+    verbose: If ``True``, log extra per-step detail. ``None`` inherits the
+        global ``spt`` verbosity setting.
+
+**Example:**
+```python
+import torchmetrics
+import stable_pretraining as spt
+
+knn_probe = spt.callbacks.OnlineKNN(
+    name="knn_probe",
+    input="embedding",
+    target="label",
+    queue_length=20000,
+    metrics={"accuracy": torchmetrics.classification.MulticlassAccuracy(10)},
+    input_dim=512,
+    k=10,
+)
+```
+
+---
+
+#### RankMe
+
+```python
+# from stable_pretraining.callbacks import RankMe
+def __init__(
+    self,
+    name: str,
+    target: str,
+    queue_length: int,
+    target_shape: Union[int, Iterable[int]],
+    verbose: bool = None,
+) -> None
+```
+
+RankMe (effective rank) monitor using queue discovery.
+
+RankMe measures the effective rank of feature representations by computing
+the exponential of the entropy of normalized singular values. This metric
+helps detect dimensional collapse in self-supervised learning.
+
+Args:
+    name: Unique name for this callback instance. Used for logging and metric keys.
+    target: Key in the batch dict containing the feature embeddings to monitor.
+    queue_length: Size of the circular buffer for caching embeddings across
+        validation batches. Larger values give a more representative estimate.
+    target_shape: Shape of the target embeddings — either a single int (e.g.,
+        ``768``) or a sequence whose product is used (e.g., ``(16, 48)``).
+    verbose: If ``True``, log entropy, top singular value, and condition number
+        in addition to the RankMe score. ``None`` inherits the global ``spt``
+        verbosity setting.
+
+---
+
+#### LiDAR
+
+```python
+# from stable_pretraining.callbacks import LiDAR
+def __init__(
+    self,
+    name: str,
+    target: str,
+    queue_length: int,
+    target_shape: Union[int, Iterable[int]],
+    n_classes: int = 100,
+    samples_per_class: int = 10,
+    delta: float = 1e-4,
+    epsilon: float = 1e-8,
+    verbose: bool = None,
+) -> None
+```
+
+LiDAR (Linear Discriminant Analysis Rank) monitor using queue discovery.
+
+LiDAR measures the effective rank of learned representations using Linear Discriminant
+Analysis (LDA). It computes the exponential of the entropy of the eigenvalue distribution
+from the LDA transformation, providing a metric between 1 and min(d, n_classes - 1) where
+d is the feature dimension, indicating how many dimensions are effectively being used.
+
+This implementation is based on Thilak et al. "LiDAR: Sensing Linear Probing Performance
+in Joint Embedding SSL Architectures" (arXiv:2312.04000).
+
+Args:
+    name: Unique identifier for this callback instance
+    target: Key in batch dict containing the feature embeddings to monitor
+    queue_length: Size of the circular buffer for caching embeddings
+    target_shape: Shape of the target embeddings (e.g., 768 for 768-dim features)
+    n_classes: Number of surrogate classes (clean samples) for LDA computation
+    samples_per_class: Number of augmented samples per class
+    delta: Regularization constant added to the within-class scatter matrix to
+        ensure it is invertible. Default is ``1e-4``.
+    epsilon: Small constant added for numerical stability when computing the
+        eigenvalue entropy. Default is ``1e-8``.
+    verbose: If ``True``, log per-class scatter diagnostics in addition to the
+        LiDAR score. ``None`` inherits the global ``spt`` verbosity setting.
+
+---
+
+#### CLIPZeroShot
+
+```python
+# from stable_pretraining.callbacks import CLIPZeroShot
+def __init__(
+    self,
+    name: str,
+    image_key: str,
+    class_key: str,
+    class_names: list[str],
+    image_backbone: torch.nn.Module,
+    text_backbone: torch.nn.Module,
+    tokenizer_fn: Callable[[str | list[str]], torch.Tensor],
+    metrics: Optional[dict | tuple | list | torchmetrics.Metric] = None,
+) -> None
+```
+
+Zero-shot classification evaluator for CLIP-style models.
+
+This callback computes zero-shot predictions by computing the similarity between the image embeddings and the class embeddings.
+
+Args:
+    name: Unique identifier for this callback instance (used as log prefix and registry key).
+    image_key: Key in batch or outputs containing input images or precomputed image features.
+    tokens_key: Key in batch containing tokenized text.
+    class_key: Key in batch containing ground-truth class indices (0..C-1, aligned with class_names order).
+    class_names: List of class names in index order.
+    image_backbone: Module/callable to encode images into embeddings.
+    text_backbone: Module/callable to encode tokenized text into embeddings.
+    tokenizer_fn: Callable that maps str | list[str] -> tensor of shape (T,).
+    metrics: Dict of torchmetrics to compute on validation (e.g., {"top1": MulticlassAccuracy(...)}).
+
+---
+
+#### ImageRetrieval
+
+```python
+# from stable_pretraining.callbacks import ImageRetrieval
+def __init__(
+    self,
+    pl_module,
+    name: str,
+    input: str,
+    query_col: str,
+    retrieval_col: str | List[str],
+    metrics,
+    features_dim: Union[tuple[int], list[int], int],
+    normalizer: str = None,
+) -> None
+```
+
+Image Retrieval evaluator for self-supervised learning.
+
+The implementation follows:
+  1. https://github.com/facebookresearch/dino/blob/main/eval_image_retrieval.py
+
+---
+
+#### LatentViz
+
+```python
+# from stable_pretraining.callbacks import LatentViz
+def __init__(
+    self,
+    name: str,
+    input: str,
+    target: Optional[str],
+    projection: torch.nn.Module,
+    queue_length: int = 2048,
+    k_neighbors: int = 15,
+    n_negatives: int = 5,
+    optimizer: Optional[Union[str, dict, partial, torch.optim.Optimizer]] = None,
+    scheduler: Optional[
+        Union[str, dict, partial, torch.optim.lr_scheduler.LRScheduler]
+    ] = None,
+    accumulate_grad_batches: int = 1,
+    update_interval: int = 10,
+    warmup_epochs: int = 0,
+    distance_metric: Literal["euclidean", "cosine"] = "euclidean",
+    plot_interval: int = 10,
+    save_dir: Optional[str] = None,
+    input_dim: Optional[Union[int, tuple, list]] = None,
+    verbose: bool = None,
+)
+```
+
+Online latent visualization callback with neighborhood-preserving dimensionality reduction.
+
+This callback learns a 2D projection that preserves neighborhood structure from
+high-dimensional features. It uses a contrastive loss that attracts neighbors
+and repels non-neighbors in the 2D space.
+
+The loss function is:
+    L = -∑_{ij} P_{ij} log Q_{ij} + ∑_{i,j ∈ Neg(i)} log(1 - Q_{ij})
+
+where:
+    - P_{ij} is the high-D neighborhood graph (based on k-NN)
+    - Q_{ij} is the similarity in the learned 2D space
+    - Neg(i) is the set of negative samples for point i
+
+Args:
+    name: Unique identifier for this callback instance.
+    input: Key in batch dict containing input features to visualize.
+    target: Optional key in batch dict containing labels for coloring plots.
+        If None, points will be plotted without color coding.
+    projection: The projection module to train (maps high-D to 2D). Can be:
+        - nn.Module instance
+        - callable that returns a module
+        - Hydra config to instantiate
+    queue_length: Size of the circular buffer for features.
+    k_neighbors: Number of nearest neighbors for building P matrix.
+    n_negatives: Number of negative samples per positive pair.
+    optimizer: Optimizer configuration. If None, uses Adam (recommended for DR tasks).
+    scheduler: Learning rate scheduler configuration. If None, uses ConstantLR.
+    accumulate_grad_batches: Number of batches to accumulate gradients.
+    update_interval: Update projection network every N training batches (default: 10).
+    warmup_epochs: Number of epochs to wait before starting projection training (default: 0).
+        Allows main model to stabilize before learning 2D projections.
+    distance_metric: Metric for computing distances in high-D space.
+    plot_interval: Interval (in epochs) for plotting 2D visualization.
+    save_dir: Optional directory to save plots. If None, saves to 'latent_viz_{name}'.
+    input_dim: Expected dimensionality of input features (for queue).
+
+---
+
+#### EpochMilestones
+
+```python
+# from stable_pretraining.callbacks import EpochMilestones
+def __init__(
+    self,
+    milestones: dict[int, float],
+    monitor: Union[list[str], str] = None,
+    contains: str = None,
+    direction: str = "max",
+    after_validation: bool = True,
+    strict: bool = True,
+    verbose: bool = None,
+)
+```
+
+PyTorch Lightning callback to stop training if a monitored metric does not meet specified thresholds at given epochs.
+
+This callback allows you to define "milestones"—specific epochs at which a metric must surpass (or fall below) a given value.
+If the metric fails to meet the requirement at the milestone epoch, training is stopped early.
+
+Args:
+    metric_name (str):
+        The name of the metric to monitor (as logged in `trainer.callback_metrics`).
+    milestones (dict[int, float]):
+        A dictionary mapping epoch numbers (int) to required metric values (float).
+        At each specified epoch, the metric is checked against the corresponding value.
+    direction (str, optional):
+        One of "max" or "min".
+        - "max": Training stops if the metric is less than or equal to the milestone value.
+        - "min": Training stops if the metric is greater than or equal to the milestone value.
+        Default is "max".
+    after_validation (bool, optional):
+        If True (default), the metric is checked after validation (`on_validation_end`).
+        If False, the metric is checked after training (`on_training_end`).
+
+---
+
+#### TeacherStudentCallback
+
+```python
+# from stable_pretraining.callbacks import TeacherStudentCallback
+def __init__(
+    self,
+    update_frequency: int = 1,
+    update_after_backward: bool = False,
+    verbose: bool = None,
+)
+```
+
+Automatically updates TeacherStudentWrapper instances during training.
+
+This callback handles the EMA (Exponential Moving Average) updates for any
+TeacherStudentWrapper instances found in the model. It updates both the teacher
+parameters and the EMA coefficient schedule.
+
+The callback automatically detects all TeacherStudentWrapper instances in the
+model hierarchy and updates them at the appropriate times during training.
+
+Args:
+    update_frequency: How often to update the teacher network, measured in
+        optimizer steps. Default is ``1`` (every step).
+    update_after_backward: If ``True``, the EMA update fires after the backward
+        pass (before the optimizer step). If ``False``, it fires after the
+        optimizer step. Default is ``False``.
+    verbose: If ``True``, log the EMA coefficient and update count each step.
+        ``None`` inherits the global ``spt`` verbosity setting.
+
+---
+
+#### WeightDecayUpdater
+
+```python
+# from stable_pretraining.callbacks import WeightDecayUpdater
+def __init__(
+    self,
+    schedule_type: str = "cosine",
+    start_value: float = 0.01,
+    end_value: float = 0.0,
+    param_group_indices: list = None,
+    opt_idx: int = None,
+    verbose: bool = None,
+)
+```
+
+PyTorch Lightning Callback to update optimizer's weight decay per batch.
+
+- Supports multiple schedules: 'constant', 'linear', 'cosine', 'exponential'
+- Optionally specify which optimizer param group(s) to update (by index)
+- Infers total steps from Trainer config (max_steps or max_epochs + dataloader)
+- Checkpointable: state is saved/restored with Trainer checkpoints
+- Extensive Loguru logging
+
+Args:
+    schedule_type: Decay schedule shape. One of ``"constant"``, ``"linear"``,
+        ``"cosine"``, or ``"exponential"``. Default is ``"cosine"``.
+    start_value: Weight decay value at step 0. Default is ``0.01``.
+    end_value: Weight decay value at the final step. Ignored when
+        ``schedule_type="constant"``. Default is ``0.0``.
+    param_group_indices: Indices of optimizer param groups to update. ``None``
+        updates all param groups. Default is ``None``.
+    opt_idx: Index of the optimizer to target when the module uses multiple
+        optimizers (e.g., BYOL, DINO). ``None`` applies to whichever optimizer
+        triggers ``on_before_optimizer_step``. Default is ``None``.
+    verbose: If ``True``, log the weight decay value at each update step.
+        ``None`` inherits the global ``spt`` verbosity setting.
+
+---
+
+#### EmbeddingCache
+
+```python
+# from stable_pretraining.callbacks import EmbeddingCache
+def __init__(self, module_names: list, add_to_forward_output: bool = True)
+```
+
+Cache embedding from a module given their names.
+
+Args:
+    module_names (list of str): List of module names to hook (e.g., ['layer1', 'encoder.block1']).
+    add_to_forward_output (bool): If True, enables merging cached outputs into the dict returned by forward.
+
+---
+
+#### SklearnCheckpoint
+
+```python
+# from stable_pretraining.callbacks import SklearnCheckpoint
+```
+
+Callback for saving and loading sklearn models in PyTorch Lightning checkpoints.
+
+This callback automatically detects sklearn models (Regressors and Classifiers)
+attached to the Lightning module and handles their serialization/deserialization
+during checkpoint save/load operations. This is necessary because sklearn models
+are not natively supported by PyTorch's checkpoint system.
+
+The callback will:
+1. Automatically discover sklearn models attached to the Lightning module
+2. Save them to the checkpoint dictionary during checkpoint saving
+3. Restore them from the checkpoint during checkpoint loading
+4. Log information about discovered sklearn modules during setup
+
+Note:
+    - Only attributes that are sklearn RegressorMixin or ClassifierMixin instances are saved
+    - Private attributes (starting with '_') are ignored
+    - The callback will raise an error if a sklearn model name conflicts with existing checkpoint keys
+
+---
+
+#### WandbCheckpoint
+
+```python
+# from stable_pretraining.callbacks import WandbCheckpoint
+```
+
+Persist the wandb run ID across checkpoint save/load for seamless requeue resume.
+
+On save:
+    - Stores ``{"id": ..., "project": ..., "entity": ...}`` in the checkpoint dict.
+    - Writes a small ``wandb_resume.json`` sidecar in CWD so the Manager can
+      inject the run ID *before* ``wandb.init()`` fires on the next job.
+
+On load:
+    - Verifies the active wandb run matches the checkpoint (early injection in
+      the Manager should have already set the correct ID).
+
+---
+
+#### StrictCheckpointCallback
+
+```python
+# from stable_pretraining.callbacks import StrictCheckpointCallback
+def __init__(self, strict: bool = True)
+```
+
+A PyTorch Lightning callback that controls strict checkpoint loading behavior.
+
+---
+
+#### HuggingFaceCheckpointCallback
+
+```python
+# from stable_pretraining.callbacks import HuggingFaceCheckpointCallback
+def __init__(
+    self,
+    save_dir: str = "hf_exports",
+    per_step: bool = False,
+    verbose: bool = None,
+    raise_on_error: bool = False,
+)
+```
+
+Export HF-compatible checkpoints for PreTrainedModel submodules.
+
+Identifies submodules inheriting from Hugging Face's `PreTrainedModel`
+and exports them into standalone, "zero-knowledge" loadable HF directories.
+
+This callback automates the synchronization between Lightning training
+and the Hugging Face ecosystem, handling weight stripping (removing
+DDP/Lightning prefixes) and dependency copying.
+
+Args:
+    save_dir (str): Root directory where HF models will be exported.
+        Default is "hf_exports".
+    per_step (bool): If True, save into a fresh ``step_{global_step}`` subdir
+        on every checkpoint trigger (one snapshot per save). If False
+        (default), save into a single ``last`` subdir that is overwritten
+        on every trigger — only the most recent snapshot is kept on disk,
+        no per-step accumulation, less I/O, simpler downstream load.
+    verbose (bool): If True, logs a discovery table at the start of
+        training. Default is True.
+    raise_on_error (bool): If True, propagate export failures so training
+        halts (legacy behavior). If False (default), log the full traceback
+        via ``logger.exception`` and continue training — checkpoint export
+        is auxiliary and should never crash a run.
+
+---
+
+#### LoggingCallback
+
+```python
+# from stable_pretraining.callbacks import LoggingCallback
+```
+
+Displays validation metrics in a color-coded formatted table.
+
+This callback creates a visually appealing table of all validation metrics
+at the end of each validation epoch. Metrics are color-coded for better
+readability in terminal outputs.
+
+Features:
+- Automatic sorting of metrics by name
+- Color coding: blue for metric names, green for values
+- Filters out internal metrics (log, progress_bar)
+
+---
+
+#### ModuleSummary
+
+```python
+# from stable_pretraining.callbacks import ModuleSummary
+```
+
+Logs detailed module parameter statistics in a formatted table.
+
+This callback provides a comprehensive overview of all modules in the model,
+showing the number of trainable, non-trainable, uninitialized parameters,
+and buffers for each module. This helps understand model architecture and
+parameter distribution.
+
+The summary is displayed during the setup phase and includes:
+- Module name and hierarchy
+- Trainable parameter count
+- Non-trainable (frozen) parameter count
+- Uninitialized parameter count (for lazy modules)
+- Buffer count (non-parameter persistent state)
+
+---
+
+#### TrainerInfo
+
+```python
+# from stable_pretraining.callbacks import TrainerInfo
+```
+
+Links the trainer to the DataModule for enhanced functionality.
+
+This callback establishes a bidirectional connection between the trainer
+and DataModule, enabling the DataModule to access trainer information
+such as device placement, distributed training state, and other runtime
+configurations.
+
+This is particularly useful for DataModules that need to adapt their
+behavior based on trainer configuration (e.g., device-aware data loading,
+distributed sampling adjustments).
+
+Note:
+    Only works with DataModule instances that have a set_pl_trainer method.
+    A warning is logged if using a custom DataModule without this method.
+
+---
+
+#### SLURMInfo
+
+```python
+# from stable_pretraining.callbacks import SLURMInfo
+```
+
+Links the trainer to the DataModule for enhanced functionality.
+
+This callback establishes a bidirectional connection between the trainer
+and DataModule, enabling the DataModule to access trainer information
+such as device placement, distributed training state, and other runtime
+configurations.
+
+This is particularly useful for DataModules that need to adapt their
+behavior based on trainer configuration (e.g., device-aware data loading,
+distributed sampling adjustments).
+
+Note:
+    Only works with DataModule instances that have a set_pl_trainer method.
+    A warning is logged if using a custom DataModule without this method.
+
+---
+
+#### EnvironmentDumpCallback
+
+```python
+# from stable_pretraining.callbacks import EnvironmentDumpCallback
+def __init__(self, filename: str = "environment.json", async_dump: bool = True)
+```
+
+Dumps complete environment configuration to enable exact reproduction.
+
+DDP-safe: only runs on rank 0.
+Uses loguru for comprehensive logging of all operations.
+
+Args:
+    filename: Name of the file to save environment info
+    async_dump: If True, runs the dump in a background thread (non-blocking)
+
+---
+
+#### LogUnusedParametersOnce
+
+```python
+# from stable_pretraining.callbacks import LogUnusedParametersOnce
+def __init__(self, verbose: bool = None)
+```
+
+Lightning callback that logs parameters which do NOT receive gradients.
+
+- Registers hooks on all leaf parameters (requires_grad=True).
+- After the first backward pass, logs unused parameters via loguru.
+- Removes all hooks and disables itself for the rest of training.
+
+Works with both automatic and manual optimization.
+
+---
+
+#### CleanUpCallback
+
+```python
+# from stable_pretraining.callbacks import CleanUpCallback
+def __init__(
+    self,
+    keep_checkpoints: bool = _UNSET,
+    keep_logs: bool = _UNSET,
+    keep_hydra: bool = _UNSET,
+    keep_slurm: bool = _UNSET,
+    keep_env_dump: bool = _UNSET,
+    keep_callback_artifacts: bool = _UNSET,
+    slurm_patterns: Optional[Sequence[str]] = None,
+    extra_patterns: Optional[Sequence[str]] = None,
+    dry_run: bool = False,
+) -> None
+```
+
+Clean up local training artifacts after successful training.
+
+This callback should be added **explicitly** by the user — it is NOT
+included in the default callback set.  On successful training completion
+it removes the selected artifact categories.  If training fails (exception),
+nothing is deleted so you can debug.
+
+Args:
+    keep_checkpoints: Keep checkpoint files. Default ``True``.
+    keep_logs: Keep logger output dirs (CSV logs, wandb local, tensorboard).
+        Default ``True``.
+    keep_hydra: Keep Hydra artifacts (``.hydra/`` dir and ``hydra.log``).
+        Default ``False``.
+    keep_slurm: Keep SLURM log files (``slurm-*.out/err``).
+        Default ``False``.
+    keep_env_dump: Keep environment dump files (``environment.json``,
+        ``requirements_frozen.txt``). Default ``False``.
+    keep_callback_artifacts: Keep dirs produced by other callbacks
+        (``LatentViz`` plots, ``OnlineWriter`` output, ``hf_exports/``).
+        Default ``True``.
+    slurm_patterns: Glob patterns for SLURM files.
+    extra_patterns: Additional glob patterns to delete (relative to cwd).
+    dry_run: If ``True``, only log what would be deleted.
+
+---
+
+#### ModuleRegistryCallback
+
+```python
+# from stable_pretraining.callbacks import ModuleRegistryCallback
+def __init__(self, name: str = "default")
+```
+
+Callback that automatically registers the module for global logging access.
+
+Manages the lifecycle of the global module registry: registers the module
+on ``setup``, tracks valid-logging-step windows via batch hooks, flushes
+any buffered metrics at the start of each batch, and cleans everything up
+on ``teardown``.
+
+---
+
+#### OrderedQueue
+
+```python
+# from stable_pretraining.callbacks import OrderedQueue
+def __init__(
+    self, max_length: int, shape: Union[int, Iterable[int]] = None, dtype=None
+)
+```
+
+A queue that maintains insertion order of elements.
+
+Similar to UnsortedQueue but tracks the order in which items were inserted,
+allowing retrieval in the original insertion order even after wraparound.
+
+Args:
+    max_length: Maximum number of elements to store in the queue
+    shape: Shape of each element (excluding batch dimension). Can be int or tuple
+    dtype: Data type of the tensors to store
+
+---
+
+#### UnsortedQueue
+
+```python
+# from stable_pretraining.callbacks import UnsortedQueue
+def __init__(
+    self, max_length: int, shape: Union[int, Iterable[int]] = None, dtype=None
+)
+```
+
+A queue data structure that stores tensors with a maximum length.
+
+This module implements a circular buffer that stores tensors up to a
+maximum length. When the queue is full, new items overwrite the oldest ones.
+
+Args:
+    max_length: Maximum number of elements to store in the queue
+    shape: Shape of each element (excluding batch dimension). Can be int or tuple
+    dtype: Data type of the tensors to store
+
+---
+
+#### TrackioCheckpoint
+
+```python
+# from stable_pretraining.callbacks import TrackioCheckpoint
+```
+
+Persist the Trackio run name across checkpoint save/load for seamless requeue resume.
+
+On save:
+    - Stores ``{"name": ..., "project": ..., "group": ...}`` in the
+      checkpoint dict under the ``"trackio"`` key.
+    - Writes a ``trackio_resume.json`` sidecar in the run directory (and
+      optionally CWD) so the Manager can configure the logger's
+      ``resume="must"`` *before* ``trackio.init()`` fires on the next job.
+
+On load:
+    - Verifies the active Trackio logger matches the checkpoint.
+
+---
+
+#### SwanLabCheckpoint
+
+```python
+# from stable_pretraining.callbacks import SwanLabCheckpoint
+```
+
+Persist the SwanLab experiment ID across checkpoint save/load for seamless requeue resume.
+
+On save:
+    - Stores ``{"id": ..., "project": ..., "experiment_name": ...,
+      "group": ...}`` in the checkpoint dict under the ``"swanlab"`` key.
+    - Writes a ``swanlab_resume.json`` sidecar in the run directory (and
+      optionally CWD) so the Manager can configure the logger's
+      ``resume="must"`` *before* ``swanlab.init()`` fires on the next job.
+
+On load:
+    - Verifies the active SwanLab logger matches the checkpoint.
+
+---
+
+#### OnlineWriter
+
+```python
+# from stable_pretraining.callbacks import OnlineWriter
+def __init__(
+    self,
+    names: str,
+    path: Union[str, Path],
+    during: Union[str, list[str]],
+    every_k_epochs: int = -1,
+    save_last_epoch: bool = False,
+    save_sanity_check: bool = False,
+    all_gather: bool = True,
+) -> None
+```
+
+Writes specified batch data to disk during training and validation.
+
+This callback enables selective saving of batch data (e.g., features, predictions,
+embeddings) to disk at specified intervals during training. It's useful for
+debugging, visualization, and analysis of model behavior during training.
+
+Features:
+- Flexible saving schedule (every k epochs, last epoch, sanity check)
+- Support for distributed training with optional all_gather
+- Automatic directory creation
+- Configurable for different training phases (train, val, test)
+
+Args:
+    names: Name(s) of the batch keys to save. Can be string or list of strings.
+    path: Directory path where files will be saved.
+    during: Training phase(s) when to save ('train', 'val', 'test', or list).
+    every_k_epochs: Save every k epochs. -1 means every epoch.
+    save_last_epoch: Whether to save on the last training epoch.
+    save_sanity_check: Whether to save during sanity check phase.
+    all_gather: Whether to gather data across all distributed processes.
+
+Files are saved with naming pattern: {phase}_{name}_epoch{epoch}_batch{batch}.pt
+
+---
+
+#### EarlyStopping
+
+```python
+# from stable_pretraining.callbacks import EarlyStopping
+def __init__(
+    self,
+    mode: str = "min",
+    milestones: dict[int, float] = None,
+    metric_name: str = None,
+    patience: int = 10,
+)
+```
+
+Early stopping mechanism with support for metric milestones and patience.
+
+This module provides flexible early stopping capabilities that can halt training
+based on metric performance. It supports both milestone-based stopping (stop if
+metric doesn't reach target by specific epochs) and patience-based stopping
+(stop if metric doesn't improve for N epochs).
+
+Args:
+    mode: Optimization direction - 'min' for metrics to minimize (e.g., loss),
+        'max' for metrics to maximize (e.g., accuracy).
+    milestones: Dict mapping epoch numbers to target metric values. Training
+        stops if targets are not met at specified epochs.
+    metric_name: Name of the metric to monitor if metric is a dict.
+    patience: Number of epochs with no improvement before stopping.
+
+---
+
+## Integration patterns
+
+### 1. Minimal training run — Manager + SimCLR forward + ResNet backbone
+
+```python
+import lightning as pl
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import simclr_forward
+
+# Build model components
+backbone = spt.backbone.from_torchvision("resnet50")
+backbone.fc = torch.nn.Identity()  # Remove classification head
+
+projector = torch.nn.Sequential(
+    torch.nn.Linear(2048, 2048),
+    torch.nn.BatchNorm1d(2048),
+    torch.nn.ReLU(inplace=True),
+    torch.nn.Linear(2048, 256),
+)
+
+# Wire forward function into Module
+module = spt.Module(
+    forward=simclr_forward,
+    backbone=backbone,
+    projector=projector,
+    simclr_loss=spt.losses.NTXEntLoss(temperature=0.5),
+    optim={
+        "optimizer": {"type": "LARS", "lr": 5, "weight_decay": 1e-6},
+        "scheduler": {"type": "LinearWarmupCosineAnnealing"},
+        "interval": "epoch",
+    },
+)
+
+# Configure trainer
+trainer = pl.Trainer(
+    max_epochs=100,
+    precision="16-mixed",
+    logger=False,
+    enable_checkpointing=False,
+)
+
+# data must be a pl.LightningDataModule or spt.data.DataModule
+# data = spt.data.DataModule(train=train_dataloader, val=val_dataloader)
+manager = spt.Manager(trainer=trainer, module=module, data=data, seed=42)
+manager()
+```
+
+### 2. Adding an evaluation callback — OnlineProbe and OnlineKNN
+
+```python
+import lightning as pl
+import torch
+import torchmetrics
+import stable_pretraining as spt
+from stable_pretraining.forward import simclr_forward
+
+backbone = spt.backbone.from_torchvision("resnet18", low_resolution=True)
+backbone.fc = torch.nn.Identity()
+
+projector = torch.nn.Sequential(
+    torch.nn.Linear(512, 2048),
+    torch.nn.BatchNorm1d(2048),
+    torch.nn.ReLU(inplace=True),
+    torch.nn.Linear(2048, 256),
+)
+
+module = spt.Module(
+    forward=simclr_forward,
+    backbone=backbone,
+    projector=projector,
+    simclr_loss=spt.losses.NTXEntLoss(temperature=0.5),
+    optim={
+        "optimizer": {"type": "LARS", "lr": 5, "weight_decay": 1e-6},
+        "scheduler": {"type": "LinearWarmupCosineAnnealing"},
+        "interval": "epoch",
+    },
+)
+
+# Linear probe: trains a small classifier on frozen embeddings during pretraining
+linear_probe = spt.callbacks.OnlineProbe(
+    module,
+    name="linear_probe",
+    input="embedding",
+    target="label",
+    probe=torch.nn.Linear(512, 10),
+    loss_fn=torch.nn.CrossEntropyLoss(),
+    metrics={
+        "top1": torchmetrics.classification.MulticlassAccuracy(10),
+        "top5": torchmetrics.classification.MulticlassAccuracy(10, top_k=5),
+    },
+)
+
+# KNN probe: non-parametric nearest-neighbor evaluation at zero training cost
+knn_probe = spt.callbacks.OnlineKNN(
+    name="knn_probe",
+    input="embedding",
+    target="label",
+    queue_length=20000,
+    metrics={"accuracy": torchmetrics.classification.MulticlassAccuracy(10)},
+    input_dim=512,
+    k=10,
+)
+
+trainer = pl.Trainer(
+    max_epochs=200,
+    callbacks=[linear_probe, knn_probe],
+    precision="16-mixed",
+)
+
+manager = spt.Manager(trainer=trainer, module=module, data=data, seed=42)
+manager()
+```
+
+### 3. Custom forward function — correct signature and return format
+
+```python
+import torch
+import stable_pretraining as spt
+from typing import Any
+
+# Custom forward follows the same signature as built-in forward functions.
+# self is the Module instance (bound at runtime via types.MethodType).
+# batch is always a dict. stage is "train", "val", or "test".
+# During training the returned dict must contain "loss".
+def my_contrastive_forward(self, batch: dict[str, Any], stage: str) -> dict[str, torch.Tensor]:
+    out = {}
+
+    # Handle multi-view (list of dicts) vs. single-view (one dict)
+    if "views" in batch:
+        views = batch["views"]
+    elif "image" not in batch:
+        views = list(batch.values())
+    else:
+        views = None
+
+    if views is not None:
+        # Multi-view training path — SimCLR-style for illustration
+        embeddings = [self.backbone(view["image"]) for view in views]
+        out["embedding"] = torch.cat(embeddings, dim=0)
+
+        if "label" in views[0]:
+            out["label"] = torch.cat([view["label"] for view in views], dim=0)
+
+        if self.training:
+            projections = [self.projector(emb) for emb in embeddings]
+            out["loss"] = self.simclr_loss(projections[0], projections[1])
+            self.log(
+                f"{stage}/loss",
+                out["loss"],
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
+    else:
+        # Single-view validation path
+        out["embedding"] = self.backbone(batch["image"])
+        if "label" in batch:
+            out["label"] = batch["label"]
+
+    return out
+
+# Wire it into Module exactly like a built-in forward function
+backbone = spt.backbone.from_torchvision("resnet50")
+module = spt.Module(
+    forward=my_contrastive_forward,
+    backbone=backbone,
+    projector=torch.nn.Linear(2048, 128),
+    simclr_loss=spt.losses.NTXEntLoss(temperature=0.5),
+    optim={"optimizer": {"type": "Adam", "lr": 1e-3}},
+)
+```
+
+### 4. Extracting embeddings after pretraining — loading checkpoint and running inference
+
+```python
+import torch
+import stable_pretraining as spt
+from stable_pretraining.forward import simclr_forward
+
+# Reconstruct module with the same architecture used during pretraining
+backbone = spt.backbone.from_torchvision("resnet50")
+backbone.fc = torch.nn.Identity()
+
+module = spt.Module(
+    forward=simclr_forward,
+    backbone=backbone,
+    projector=torch.nn.Linear(2048, 256),
+    simclr_loss=spt.losses.NTXEntLoss(temperature=0.5),
+)
+
+# Load checkpoint weights
+checkpoint_path = "/path/to/checkpoints/last.ckpt"
+ckpt = torch.load(checkpoint_path, map_location="cpu")
+module.load_state_dict(ckpt["state_dict"])
+module.eval()
+
+# Extract embeddings using predict_step (stage="predict", no loss computed)
+import lightning as pl
+
+# Wrap your inference dataset in a DataModule
+# inference_datamodule = spt.data.DataModule(val=inference_dataloader)
+
+trainer = pl.Trainer(accelerator="auto")
+predictions = trainer.predict(module, dataloaders=inference_dataloader)
+
+# Each prediction is the dict returned by forward(batch, stage="predict")
+# Access embeddings from predictions
+all_embeddings = torch.cat([p["embedding"] for p in predictions], dim=0)
+print(f"Extracted {all_embeddings.shape[0]} embeddings of dim {all_embeddings.shape[1]}")
+```
+
+---
+
+## Method index
+
+# Methods
+
+Full catalog of all SSL methods in `stable-pretraining`.
+
+Methods come in two forms:
+
+- **Forward functions** (`stable_pretraining/forward.py`) — stateless functions used with `spt.Module`. You compose them with a backbone, loss, and callbacks yourself. Best for custom experiments.
+- **Method classes** (`stable_pretraining/methods/`) — full `LightningModule` implementations with the backbone, loss, and optimizer pre-wired. Best for reproducing published results quickly.
+
+---
+
+## Complete Method Table
+
+`TeacherStudent†` in the callbacks column means the method requires `TeacherStudentCallback` when using the forward-function approach (EMA teacher updates). Method classes handle this internally.
+
+| Method | Forward fn | Method class | Loss class(es) | Key callbacks | Paper |
+|--------|-----------|--------------|----------------|---------------|-------|
+| Supervised | `supervised_forward` | — | any | — | — |
+| SimCLR | `simclr_forward` | `SimCLR` | `NTXEntLoss` | — | [Chen et al., 2020](https://arxiv.org/abs/2002.05709) |
+| BYOL | `byol_forward` | `BYOL` | `BYOLLoss` | `TeacherStudent†` | [Grill et al., 2020](https://arxiv.org/abs/2006.07733) |
+| VICReg | `vicreg_forward` | `VICReg` | `VICRegLoss` | — | [Bardes et al., 2022](https://arxiv.org/abs/2105.04906) |
+| Barlow Twins | `barlow_twins_forward` | `BarlowTwins` | `BarlowTwinsLoss` | — | [Zbontar et al., 2021](https://arxiv.org/abs/2103.03230) |
+| SwAV | `swav_forward` | `SwAV` | `SwAVLoss` | `OnlineQueue` | [Caron et al., 2020](https://arxiv.org/abs/2006.09882) |
+| NNCLR | `nnclr_forward` | `NNCLR` | `NTXEntLoss` | `OnlineQueue` | [Dwibedi et al., 2021](https://arxiv.org/abs/2104.14548) |
+| DINO | `dino_forward` | `DINO` | `DINOv1Loss` | `TeacherStudent†` | [Caron et al., 2021](https://arxiv.org/abs/2104.14294) |
+| DINOv2 | `dinov2_forward` | `DINOv2` | `DINOv2Loss`, `iBOTPatchLoss` | `TeacherStudent†` | [Oquab et al., 2024](https://arxiv.org/abs/2304.07193) |
+| BEiT | — | `BEiT` | — | — | [Bao et al., 2022](https://arxiv.org/abs/2106.08254) |
+| CMAE | — | `CMAE` | — | — | [Huang et al., 2023](https://arxiv.org/abs/2207.13532) |
+| Data2Vec | — | `Data2Vec` | — | `TeacherStudent†` | [Baevski et al., 2022](https://arxiv.org/abs/2202.03555) |
+| DINOv3 | — | `DINOv3` | `DINOv2Loss` | `TeacherStudent†` | [Siméoni et al., 2025](https://arxiv.org/abs/2309.16588) |
+| iBOT | — | `iBOT` | `DINOv1Loss`, `iBOTPatchLoss` | `TeacherStudent†` | [Zhou et al., 2022](https://arxiv.org/abs/2111.07832) |
+| iGPT | — | `iGPT` | — | — | [El-Nouby et al., 2024](https://arxiv.org/abs/2401.08541) |
+| IJEPA | — | `IJEPA` | — | — | [Assran et al., 2023](https://arxiv.org/abs/2301.08243) |
+| LeJEPA | — | `LeJEPA` | — | — | [Balestriero & LeCun, 2025](https://arxiv.org/abs/2511.08544) |
+| MAE | — | `MAE` | `MAELoss` | — | [He et al., 2022](https://arxiv.org/abs/2111.06377) |
+| MaskFeat | — | `MaskFeat` | — | — | [Wei et al., 2022](https://arxiv.org/abs/2112.09133) |
+| MIMRefiner | — | `MIMRefiner` | `DINOv1Loss`, `iBOTPatchLoss` | — | [Lehner et al., 2024](https://arxiv.org/abs/2402.10093) |
+| MoCov2 | — | `MoCov2` | `NTXEntLoss` | — | [Chen et al., 2020](https://arxiv.org/abs/2003.04297) |
+| MoCov3 | — | `MoCov3` | `NTXEntLoss` | — | [Chen et al., 2021](https://arxiv.org/abs/2104.02057) |
+| MSN | — | `MSN` | — | — | [Assran et al., 2022](https://arxiv.org/abs/2204.07141) |
+| NEPA | — | `NEPA` | — | — | — |
+| PIRL | — | `PIRL` | — | — | [Misra & van der Maaten, 2020](https://arxiv.org/abs/1912.01991) |
+| SALT | — | `SALT` | — | — | [Li et al., 2025](https://arxiv.org/pdf/2509.24317) |
+| SimMIM | — | `SimMIM` | — | — | [Xie et al., 2022](https://arxiv.org/abs/2111.09886) |
+| SimSiam | — | `SimSiam` | — | — | [Chen & He, 2021](https://arxiv.org/abs/2011.10566) |
+| TiCO | — | `TiCO` | — | — | [Zhu et al., 2022](https://arxiv.org/abs/2206.10698) |
+| VICRegL | — | `VICRegL` | `VICRegLoss` | — | [Bardes et al., 2022](https://arxiv.org/abs/2210.01571) |
+| WMSE | — | `WMSE` | — | — | [Ermolov et al., 2021](https://arxiv.org/abs/2007.06346) |
+
+---
+
+## Loss Classes
+
+All loss classes are importable from `stable_pretraining.losses`:
+
+| Loss | Methods that use it |
+|------|-------------------|
+| `NTXEntLoss` | SimCLR, NNCLR, MoCov2, MoCov3 |
+| `BYOLLoss` | BYOL |
+| `VICRegLoss` | VICReg, VICRegL |
+| `BarlowTwinsLoss` | Barlow Twins |
+| `SwAVLoss` | SwAV |
+| `DINOv1Loss` | DINO, iBOT, MIMRefiner |
+| `DINOv2Loss` | DINOv2, DINOv3 |
+| `iBOTPatchLoss` | DINOv2, iBOT, MIMRefiner |
+| `MAELoss` | MAE |
+| `CLIPLoss` | Multimodal CLIP-style objectives |
+| `NegativeCosineSimilarity` | SimSiam, general use |
+
+---
+
+## Additional documentation
+
+### AGENTS.md
+
+stable-pretraining — Agent Instructions
+
+## What this library does
+
+`stable-pretraining` is a PyTorch Lightning framework for self-supervised learning (SSL) research. It provides 9 composable forward functions and 30 full `LightningModule` method classes covering SimCLR, BYOL, VICReg, Barlow Twins, SwAV, NNCLR, DINO, DINOv2, MAE, BEiT, MoCo, and more — all built on top of `lightning`. The key design principle is that **users only define `forward(self, batch, stage)`** — the framework builds `training_step` and `validation_step` around it, with all data flowing as dicts so callbacks can intercept any intermediate value without modifying the forward function.
+
+Full file: ./AGENTS.md
+
+---
+
+### CLAUDE.md
+
+stable-pretraining — Claude Instructions
+
+The full agent instructions for this repository are in AGENTS.md. Read that file first and treat it as authoritative.
+
+Claude-specific notes include memory guidance (30 SSL method classes, METHODS.md as ground-truth), preferred workflow for code changes (read source files before proposing anything), docstring style (Google-style), and common commands for installation, testing, linting, and the registry CLI.
+
+Full file: ./CLAUDE.md
+
+---
+
+### stable_pretraining/callbacks/README.md
+
+Callback guide
+
+Available callbacks organized into Evaluation & Monitoring (OnlineProbe, OnlineKNN, RankMe, LiDAR, CLIPZeroShot, ImageRetrieval, LatentViz, EpochMilestones) and Training Utilities (TeacherStudentCallback, WeightDecayUpdater, EmbeddingCache).
+
+Practical considerations: Parametric probes (e.g. OnlineProbe) are jointly optimized alongside the backbone model. The benchmark / downstream data (with labels) used for the probe needs to be present in the pretraining dataset. Features probes receive are continuously shifting during training; once representations converge, probe training converges as well.
+
+Full file: ./stable_pretraining/callbacks/README.md
+
+---
+
+## Known gaps (as of 2026-05-15)
+
+- `spt.SimCLR` and other method classes at the top-level namespace resolve for the 9 most-used methods (BarlowTwins, BYOL, DINO, DINOv2, MAE, NNCLR, SimCLR, SwAV, VICReg). For all 30 method classes use `from stable_pretraining.methods import <MethodName>`.
+- Docstrings for several Module methods are partial. `configure_optimizers` has a full docstring; `training_step`, `validation_step`, `test_step`, `predict_step`, `on_train_start`, `named_parameters`, `parameters`, `rescale_loss_for_grad_acc`, `after_manual_backward` have docstrings. Coverage is approximately 80%.
+- Docstrings for several Manager methods are partial. `__init__` and `__call__` have full docstrings. Internal methods `_maybe_restore_wandb_run_id`, `_resolve_run_dir`, `_configure_cache_dir_checkpointing`, etc. have partial or no docstrings.
+- stable-pretraining is not yet available on PyPI. Install from source: `git clone https://github.com/galilai-group/stable-pretraining.git && pip install -e .`

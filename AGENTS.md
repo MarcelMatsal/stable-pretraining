@@ -25,6 +25,7 @@ stable_pretraining/
 examples/           # runnable .py scripts and YAML configs
 docs/               # Sphinx source
 METHODS.md          # ground-truth index of all 30 methods + forward functions
+llms.txt / llms-full.txt   # agent-readable index; regenerate after any API change
 ```
 
 ## How to import
