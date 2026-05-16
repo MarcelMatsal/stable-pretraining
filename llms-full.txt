@@ -1,9 +1,9 @@
 # stable-pretraining
 
-> stable-pretraining is a PyTorch Lightning framework for self-supervised learning (SSL) research providing 9 composable forward functions and 30 full LightningModule method classes.
+> stable-pretraining is a PyTorch Lightning framework for self-supervised learning (SSL) research providing composable forward functions and full LightningModule method classes.
 
 Lightning-based library for self-supervised learning without labels.
-Implements 9 forward functions and 30 method classes across image and multimodal modalities.
+Implements forward functions and method classes across image and multimodal modalities.
 Designed for researchers and practitioners who want a unified API for pretraining experiments.
 
 Key concepts:
@@ -24,12 +24,12 @@ MSN, NEPA, NNCLR, PIRL, SALT, SimCLR, SimMIM, SimSiam, SwAV, TiCO, VICReg, VICRe
 ## Docs
 
 - [README](./README.md): Full quickstart, CLI reference, callback table, benchmark results
-- [Methods catalog](./METHODS.md): Ground-truth index of all 30 method classes and 9 forward functions with loss classes, key callbacks, and paper citations
+- [Methods catalog](./METHODS.md): Ground-truth index of all method classes and forward functions with loss classes, key callbacks, and paper citations
 - [Agent instructions](./AGENTS.md): Authoritative instructions for AI agents working in this codebase — naming conventions, design decisions, how-to guides
 - [Callback guide](./stable_pretraining/callbacks/README.md): Detailed usage guide for all callbacks with practical considerations
 - [API: Module](./stable_pretraining/module.py): Core LightningModule
 - [API: Manager](./stable_pretraining/manager.py): Programmatic entry point
-- [API: Forward functions](./stable_pretraining/forward.py): All 9 forward functions
+- [API: Forward functions](./stable_pretraining/forward.py): All forward functions
 - [API: Callbacks](./stable_pretraining/callbacks/): Evaluation and training callbacks
 - [Examples](./examples/): Runnable scripts and YAML configs
 - [Rendered docs](https://galilai-group.github.io/stable-pretraining/): Full Sphinx documentation on GitHub Pages
@@ -1882,7 +1882,7 @@ stable-pretraining — Agent Instructions
 
 ## What this library does
 
-`stable-pretraining` is a PyTorch Lightning framework for self-supervised learning (SSL) research. It provides 9 composable forward functions and 30 full `LightningModule` method classes covering SimCLR, BYOL, VICReg, Barlow Twins, SwAV, NNCLR, DINO, DINOv2, MAE, BEiT, MoCo, and more — all built on top of `lightning`. The key design principle is that **users only define `forward(self, batch, stage)`** — the framework builds `training_step` and `validation_step` around it, with all data flowing as dicts so callbacks can intercept any intermediate value without modifying the forward function.
+`stable-pretraining` is a PyTorch Lightning framework for self-supervised learning (SSL) research. It provides composable forward functions and full `LightningModule` method classes covering SimCLR, BYOL, VICReg, Barlow Twins, SwAV, NNCLR, DINO, DINOv2, MAE, BEiT, MoCo, and more — all built on top of `lightning`. The key design principle is that **users only define `forward(self, batch, stage)`** — the framework builds `training_step` and `validation_step` around it, with all data flowing as dicts so callbacks can intercept any intermediate value without modifying the forward function.
 
 Full file: ./AGENTS.md
 
@@ -1894,7 +1894,7 @@ stable-pretraining — Claude Instructions
 
 The full agent instructions for this repository are in AGENTS.md. Read that file first and treat it as authoritative.
 
-Claude-specific notes include memory guidance (30 SSL method classes, METHODS.md as ground-truth), preferred workflow for code changes (read source files before proposing anything), docstring style (Google-style), and common commands for installation, testing, linting, and the registry CLI.
+Claude-specific notes include memory guidance (SSL method classes, METHODS.md as ground-truth), preferred workflow for code changes (read source files before proposing anything), docstring style (Google-style), and common commands for installation, testing, linting, and the registry CLI.
 
 Full file: ./CLAUDE.md
 
@@ -1914,7 +1914,7 @@ Full file: ./stable_pretraining/callbacks/README.md
 
 ## Known gaps (as of 2026-05-15)
 
-- `spt.SimCLR` and other method classes at the top-level namespace resolve for the 9 most-used methods (BarlowTwins, BYOL, DINO, DINOv2, MAE, NNCLR, SimCLR, SwAV, VICReg). For all 30 method classes use `from stable_pretraining.methods import <MethodName>`.
+- `spt.SimCLR` and other method classes at the top-level namespace resolve for the most-used methods (BarlowTwins, BYOL, DINO, DINOv2, MAE, NNCLR, SimCLR, SwAV, VICReg). For all method classes use `from stable_pretraining.methods import <MethodName>`.
 - Docstrings for several Module methods are partial. `configure_optimizers` has a full docstring; `training_step`, `validation_step`, `test_step`, `predict_step`, `on_train_start`, `named_parameters`, `parameters`, `rescale_loss_for_grad_acc`, `after_manual_backward` have docstrings. Coverage is approximately 80%.
 - Docstrings for several Manager methods are partial. `__init__` and `__call__` have full docstrings. Internal methods `_maybe_restore_wandb_run_id`, `_resolve_run_dir`, `_configure_cache_dir_checkpointing`, etc. have partial or no docstrings.
 - stable-pretraining is not yet available on PyPI. Install from source: `git clone https://github.com/galilai-group/stable-pretraining.git && pip install -e .`

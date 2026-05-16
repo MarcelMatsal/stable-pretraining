@@ -24,7 +24,7 @@ stable_pretraining/
   _config.py        # global config: spt.set(key, value) / spt.get_config()
 examples/           # runnable .py scripts and YAML configs
 docs/               # Sphinx source
-METHODS.md          # ground-truth index of all 30 methods + forward functions
+METHODS.md          # ground-truth index of all methods + forward functions
 llms.txt / llms-full.txt   # agent-readable index; regenerate after any API change
 ```
 

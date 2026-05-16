@@ -1,9 +1,9 @@
 # stable-pretraining
 
-> stable-pretraining is a PyTorch Lightning framework for self-supervised learning (SSL) research providing 9 composable forward functions and 30 full LightningModule method classes.
+> stable-pretraining is a PyTorch Lightning framework for self-supervised learning (SSL) research providing composable forward functions and full LightningModule method classes.
 
 Lightning-based library for self-supervised learning without labels.
-Implements 9 forward functions and 30 method classes across image and multimodal modalities.
+Implements forward functions and method classes across image and multimodal modalities.
 Designed for researchers and practitioners who want a unified API for pretraining experiments.
 
 Key concepts:
@@ -24,12 +24,12 @@ MSN, NEPA, NNCLR, PIRL, SALT, SimCLR, SimMIM, SimSiam, SwAV, TiCO, VICReg, VICRe
 ## Docs
 
 - [README](./README.md): Full quickstart, CLI reference, callback table, benchmark results
-- [Methods catalog](./METHODS.md): Ground-truth index of all 30 method classes and 9 forward functions with loss classes, key callbacks, and paper citations
+- [Methods catalog](./METHODS.md): Ground-truth index of all method classes and forward functions with loss classes, key callbacks, and paper citations
 - [Agent instructions](./AGENTS.md): Authoritative instructions for AI agents working in this codebase — naming conventions, design decisions, how-to guides
 - [Callback guide](./stable_pretraining/callbacks/README.md): Detailed usage guide for all callbacks with practical considerations
 - [API: Module](./stable_pretraining/module.py): Core LightningModule
 - [API: Manager](./stable_pretraining/manager.py): Programmatic entry point
-- [API: Forward functions](./stable_pretraining/forward.py): All 9 forward functions
+- [API: Forward functions](./stable_pretraining/forward.py): All forward functions
 - [API: Callbacks](./stable_pretraining/callbacks/): Evaluation and training callbacks
 - [Examples](./examples/): Runnable scripts and YAML configs
 - [Rendered docs](https://galilai-group.github.io/stable-pretraining/): Full Sphinx documentation on GitHub Pages
