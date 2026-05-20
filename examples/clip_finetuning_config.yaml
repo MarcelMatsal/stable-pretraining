@@ -49,15 +49,15 @@ params:
   spur_train_label: 0
   spur_test_label: 0
   spur_proportion: 0.05
-  total_train_samples: 50000
+  total_train_samples: 100000
   total_test_samples: 10000
   use_dora: false
-  dataset: uoft-cs/cifar10
+  dataset: zh-plus/tiny-imagenet
   label_key: label
-  image_key: img
-  zeroshot_dataset: uoft-cs/cifar10
+  image_key: image
+  zeroshot_dataset: zh-plus/tiny-imagenet
   zero_label: label
-  test_split: test
+  test_split: valid
   text_spur: false
   spur_text_labels: [0, 1]
   text_spur_location: append
