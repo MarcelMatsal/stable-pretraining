@@ -40,6 +40,25 @@ def main(cfg: DictConfig):
 
     text_rng = np.random.RandomState(cfg.params.seed)
 
+    def _load_class_names(dataset_path, label_key, split):
+        """Load class names from a HuggingFace dataset's ClassLabel feature.
+        Uses NLTK WordNet for readable English names when synset IDs are present
+        (e.g. Tiny ImageNet). Falls back to raw feature names if NLTK is unavailable.
+        Install: pip install nltk && python -m nltk.downloader wordnet
+        """
+        import datasets as _hf
+        _ds = _hf.load_dataset(dataset_path, split=split, streaming=True)
+        raw_names = _ds.features[label_key].names
+
+        def _synset_to_name(s):
+            try:
+                from nltk.corpus import wordnet as wn
+                return wn.synset_from_pos_and_offset("n", int(s[1:])).lemma_names()[0].replace("_", " ")
+            except Exception:
+                return s
+
+        return [_synset_to_name(n) if n.startswith("n") and n[1:].isdigit() else n for n in raw_names]
+
     if cfg.params.dataset == "uoft-cs/cifar10":
         class_names = [
             "airplane", "automobile", "bird", "cat", "deer",
@@ -62,6 +81,8 @@ def main(cfg: DictConfig):
             "television", "tiger", "tractor", "train", "trout", "tulip", "turtle",
             "wardrobe", "whale", "willow_tree", "wolf", "woman", "worm",
         ]
+    else:
+        class_names = _load_class_names(cfg.params.dataset, cfg.params.label_key, "train")
 
     if cfg.params.zeroshot_dataset == "uoft-cs/cifar10":
         zero_class_names = [
@@ -85,6 +106,8 @@ def main(cfg: DictConfig):
             "television", "tiger", "tractor", "train", "trout", "tulip", "turtle",
             "wardrobe", "whale", "willow_tree", "wolf", "woman", "worm",
         ]
+    else:
+        zero_class_names = _load_class_names(cfg.params.zeroshot_dataset, cfg.params.zero_label, cfg.params.test_split)
 
     TEXT_SPUR_TRAIN_LABELS = set(cfg.params.spur_text_labels)
 
@@ -192,7 +215,7 @@ def main(cfg: DictConfig):
             raise ValueError("Must have a spurious type if creating spurious correlations")
         if cfg.params.spur_type == "watermark":
             transform_train = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddWatermark(
@@ -209,7 +232,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_test = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddWatermark(
@@ -226,7 +249,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_eval = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddWatermark(
@@ -244,7 +267,7 @@ def main(cfg: DictConfig):
             )
         elif cfg.params.spur_type == "border":
             transform_train = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddBorder(
@@ -259,7 +282,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_test = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddBorder(
@@ -274,7 +297,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_eval = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddBorder(
@@ -290,7 +313,7 @@ def main(cfg: DictConfig):
             )
         elif cfg.params.spur_type == "patch":
             transform_train = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddPatch(
@@ -307,7 +330,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_test = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddPatch(
@@ -324,7 +347,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_eval = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddPatch(
@@ -342,7 +365,7 @@ def main(cfg: DictConfig):
             )
         elif cfg.params.spur_type == "tint":
             transform_train = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddColorTint(
@@ -356,7 +379,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_test = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddColorTint(
@@ -370,7 +393,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_eval = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddColorTint(
@@ -385,7 +408,7 @@ def main(cfg: DictConfig):
             )
         elif cfg.params.spur_type == "checkerboard":
             transform_train = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddCheckerboardPattern(
@@ -399,7 +422,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_test = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddCheckerboardPattern(
@@ -413,7 +436,7 @@ def main(cfg: DictConfig):
                 ),
             )
             transform_eval = transforms.Compose(
-                transforms.ToImage(source="img", target="img"),
+                transforms.ToImage(source=cfg.params.image_key, target="img"),
                 transforms.AddSampleIdx(),
                 transforms.ClassConditionalInjector(
                     transformation=transforms.AddCheckerboardPattern(
@@ -429,9 +452,9 @@ def main(cfg: DictConfig):
         else:
             raise Exception("Spurious type for images must either be: watermark, border, patch, or tint")
     else:
-        transform_train = transforms.Compose(transforms.ToImage(source="img", target="img"))
-        transform_test = transforms.Compose(transforms.ToImage(source="img", target="img"))
-        transform_eval = transforms.Compose(transforms.ToImage(source="img", target="img"))
+        transform_train = transforms.Compose(transforms.ToImage(source=cfg.params.image_key, target="img"))
+        transform_test = transforms.Compose(transforms.ToImage(source=cfg.params.image_key, target="img"))
+        transform_eval = transforms.Compose(transforms.ToImage(source=cfg.params.image_key, target="img"))
 
     finetuning_dataset = spt.data.HFDataset(
         path=cfg.params.dataset,
@@ -441,7 +464,7 @@ def main(cfg: DictConfig):
 
     val_dataset = spt.data.HFDataset(
         path=cfg.params.dataset,
-        split="test",
+        split=cfg.params.test_split,
         transform=transform_test,
     )
 
@@ -478,7 +501,7 @@ def main(cfg: DictConfig):
     def preprocess(example):
         return processor(
             text=example["answer"],
-            images=example["img"],
+            images=example[cfg.params.image_key],
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -596,16 +619,16 @@ def main(cfg: DictConfig):
     text_backbone = CLIPTextWrapper(clip_model)
     image_backbone = CLIPImageWrapper(clip_model)
 
-    transform_eval_clean = transforms.Compose(transforms.ToImage(source="img", target="img"))
+    transform_eval_clean = transforms.Compose(transforms.ToImage(source=cfg.params.image_key, target="img"))
 
     eval_dataset = spt.data.HFDataset(
         path=cfg.params.zeroshot_dataset,
-        split="test",
+        split=cfg.params.test_split,
         transform=transform_eval,
     )
     eval_dataset_clean = spt.data.HFDataset(
         path=cfg.params.zeroshot_dataset,
-        split="test",
+        split=cfg.params.test_split,
         transform=transform_eval_clean,
     )
 

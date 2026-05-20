@@ -160,3 +160,5 @@ wandb/
 *.out
 
 ._version.py
+
+SPT_WEB_PLAN.md

@@ -57,6 +57,7 @@ params:
   image_key: img
   zeroshot_dataset: uoft-cs/cifar10
   zero_label: label
+  test_split: test
   text_spur: false
   spur_text_labels: [0, 1]
   text_spur_location: append
