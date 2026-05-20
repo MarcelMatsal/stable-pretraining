@@ -320,7 +320,7 @@ def main(cfg: DictConfig):
                         patch_size=cfg.params.patch_size,
                         color=cfg.params.patch_color,
                         position=cfg.params.patch_pos,
-                        img_key=cfg.params.image_key
+                        img_key="img"
                     ),
                     label_key=cfg.params.label_key,
                     target_labels=cfg.params.spur_train_label,
@@ -337,7 +337,7 @@ def main(cfg: DictConfig):
                         patch_size=cfg.params.patch_size,
                         color=cfg.params.patch_color,
                         position=cfg.params.patch_pos,
-                        img_key=cfg.params.image_key
+                        img_key="img"
                     ),
                     label_key=cfg.params.label_key,
                     target_labels=cfg.params.spur_test_label,
@@ -354,7 +354,7 @@ def main(cfg: DictConfig):
                         patch_size=cfg.params.patch_size,
                         color=cfg.params.patch_color,
                         position=cfg.params.patch_pos,
-                        img_key=cfg.params.image_key
+                        img_key="img"
                     ),
                     label_key=cfg.params.zero_label,
                     target_labels=cfg.params.spur_test_label,
